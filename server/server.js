@@ -1,25 +1,21 @@
 // src/server.js
 const express = require('express');
 const http = require('http');
-const socketIo = require('socket.io');
-const mediasoup = require('mediasoup');
+// const { mediasoup } = require('mediasoup');
 const cors = require('cors')
+const { createWorker, worker, getRouter } = require('./mediasoup-config');
+(async () => {
+  await createWorker();
+})();
 const app = express();
 const server = http.createServer(app);
 const io = require("socket.io")(server, {
-    cors: {
-      origin: "http://localhost:3000",
-      methods: ["GET", "POST"],
-      credentials: true
-    }
-  });
-
-// MediaSoup server setup
-const { createWorker, worker, getRouter } = require('./mediasoup-config');
-
-(async () => {
-    await createWorker();
-  })();
+  cors: {
+    origin: "http://localhost:3000",
+    methods: ["GET", "POST"],
+    credentials: true
+  }
+});
 
 // cors setup
 app.use(cors({ 
@@ -39,59 +35,83 @@ app.use((req, res, next) => {
     next();
 });
 
-io.on('connection', (socket) => {
-  console.log('New client connected');
-  
-  // Handle client requests for MediaSoup
+const rooms = new Map()
+// const peers = io.of('/mediasoup')
+
+io.on("connection", socket =>{
+  console.log('new peer connected', socket.id)
   socket.on('joinRoom', async ({ username, roomId }, callback) => {
-    console.log(`${username} is joining room: ${roomId}`);
-    // Create or join room logic
-    // Create a transport for the client
-    const router = getRouter();
-    socket.on('getRouterCapabilities', (callback) =>{
-        const rtpCapabilities = router.rtpCapabilities;
-        callback(rtpCapabilities);
+    let room = rooms.get(roomId)
+    let router;
+    let producerTransport
+    let consumerTransport
+    if(!room){
+      console.log('creating a new room with id:', roomId, `Adding user:${username}`)
+      router = await getRouter();
+      rooms.set(roomId, { router, peers: [] });
+      async()=>{
+        if(rooms.has(roomId)){
+          await rooms.peers.push(username)
+        }
+      }
+    }
+    else{
+      console.log(`Adding ${username} to existing room ${roomId}`)
+      router = room.router
+      async()=>{
+        if(rooms.has(roomId)){
+          await rooms.peers.push(username)
+          socket.emit("newParticipant", rooms.peers)
+          console.log("emiting event new participant and sending peers:", rooms.peers)
+        }
+      }
+    }
+    //push the new peer into the room
+    console.log(rooms)
+    
+    //send router rtpcapabilities to client
+    const  rtpCapabilities= router.rtpCapabilities
+    callback({rtpCapabilities})
+    //once we have the router, we create produce and consume transports for each
+    socket.on("createWebRTCTransport",async(callback)=>{
+      // create both producerTransport and consumer Transport
+      producerTransport = await createWebRtcTransport(router)
+      consumerTransport = await createWebRtcTransport(router)
+      
+      callback({producer:producerTransport,consumer:consumerTransport})
     })
-    const transport = await createWebRtcTransport(router);
-    callback({ transportOptions: transport });
-    socket.join(roomId);
-    io.to(roomId).emit('roomJoined', { username, roomId });
 
-    socket.on('newParticipant', ({ id, stream }) => {
-        socket.to(roomId).emit('newParticipant', { id, stream });
-      });
-  
-      socket.on('leaveRoom', ({ username, roomId }) => {
-        socket.leave(roomId);
-        socket.to(roomId).emit('participantLeft', username);
-      });
-  });
+  })
 
-  socket.on('disconnect', () => {
-    console.log('Client disconnected');
-  });
-});
+})
 
 const createWebRtcTransport = async (router) => {
-    const transport = await router.createWebRtcTransport({
-        listenIps: [{ ip: '0.0.0.0', announcedIp: 'localhost' }],
-        enableUdp: true,
-        enableTcp: true,
-        preferUdp: true,
-    });
+  const transport = await router.createWebRtcTransport({
+      listenIps: [{ ip: '0.0.0.0', announcedIp: 'localhost' }],
+      enableUdp: true,
+      enableTcp: true,
+      preferUdp: true,
+  });
 
-    transport.on('dtlsstatechange', dtlsState => {
-        if (dtlsState === 'closed') {
-        transport.close();
-        }
-    });
+  transport.on('dtlsstatechange', dtlsState => {
+      if (dtlsState === 'closed') {
+      transport.close();
+      }
+  });
 
-    transport.on('close', () => {
-        console.log('Transport closed');
-    });
+  transport.on('close', () => {
+      console.log('Transport closed');
+  });
 
-    return transport;
+  const transportOptions = {
+    id: transport.id,
+    iceParameters: transport.iceParameters,
+    iceCandidates: transport.iceCandidates,
+    dtlsParameters: transport.dtlsParameters
+  }
+  return transportOptions;
 };
-server.listen(5001, () => {
-  console.log('Server is running on port 5001');
-});
+
+server.listen(5001, ()=>{
+  console.log('Server runnning on port 5001')
+})

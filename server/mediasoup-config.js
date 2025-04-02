@@ -14,6 +14,7 @@
      worker = await mediasoup.createWorker(workerSettings);
      worker.on('died', () => {
        console.error('MediaSoup worker has died');
+       setTimeout(() => process.exit(1), 2000) // exit in 2 seconds
      });
 
      router = await worker.createRouter({ mediaCodecs: [
