@@ -22,23 +22,22 @@ function App() {
   const [consumers, setConsumers] = useState([])
   const producerTransport = useRef(null)
   const consumerTransport = useRef(null)
+  const localStream = useRef(null)
+  const remoteStream = useRef(null)
   const [params, setParams] = useState({
     // mediasoup params
     encodings: [
       {
         rid: 'r0',
         maxBitrate: 100000,
-        scalabilityMode: 'S1T3',
       },
       {
         rid: 'r1',
         maxBitrate: 300000,
-        scalabilityMode: 'S1T3',
       },
       {
         rid: 'r2',
         maxBitrate: 900000,
-        scalabilityMode: 'S1T3',
       },
     ],
     // https://mediasoup.org/documentation/v3/mediasoup-client/api/#ProducerCodecOptions
@@ -47,12 +46,11 @@ function App() {
     }
   })
 
-  useEffect(() => {
-    if (params.track) { // Check if the track is available
-        connectSendTransport();
-        connectRecvTransport();
-    }
-  }, [params.track]); // Run this effect when params.track changes
+  // useEffect(() => {
+  //   if (params.track) { // Check if the track is available
+        
+  //   }
+  // }, [params.track]); // Run this effect when params.track changes
 
   const addParticipantVideo = (id, stream) => {
     setVideos((prevVideos) => [...prevVideos, { id, stream }]); // Store stream and ID
@@ -70,10 +68,11 @@ function App() {
       if(username && roomId){
         navigator.mediaDevices.getUserMedia({ audio: false, video: true })
         .then(async (stream) => {
-          addParticipantVideo('username', stream);
+          // addParticipantVideo('local', stream);
+          localStream.current.srcObject = stream
           setIsVisible(false)
           const track = stream.getVideoTracks()[0]
-          console.log('printing track', track)
+          console.log('printing local stream', stream)
           setParams(prevParams => ({
             ...prevParams,
             track: track
@@ -89,12 +88,63 @@ function App() {
             console.log('device created', device.rtpCapabilities)
             socket.emit("createWebRTCTransport", async(response)=>{
               console.log('transports created', response.producer, response.consumer)
-              const producerTransportOptions = response.producer
-              const consumerTransportOptions = response.consumer
-              producerTransport.current = await device.createSendTransport(producerTransportOptions)
-              consumerTransport.current = await device.createRecvTransport(consumerTransportOptions)
               
-              
+              producerTransport.current = await device.createSendTransport(response.producer)
+              consumerTransport.current = await device.createRecvTransport(response.consumer)
+
+              producerTransport.current.on('connect', async ({ dtlsParameters }, callback, errback) => {
+                try {
+                  // Signal local DTLS parameters to the server side transport
+                  // see server's socket.on('transport-connect', ...)
+                  await socket.emit('transport-connect', {
+                    dtlsParameters,
+                  })
+          
+                  // Tell the transport that parameters were transmitted.
+                  callback()
+          
+                } catch (error) {
+                  errback(error)
+                }
+              })
+          
+              producerTransport.current.on('produce', async (parameters, callback, errback) => {
+                console.log(parameters)
+          
+                try {
+                  // tell the server to create a Producer
+                  // with the following parameters and produce
+                  // and expect back a server side producer id
+                  // see server's socket.on('transport-produce', ...)
+                  await socket.emit('transport-produce', {
+                    kind: parameters.kind,
+                    rtpParameters: parameters.rtpParameters,
+                    appData: parameters.appData,
+                  }, ({ id }) => {
+                    // Tell the transport that parameters were transmitted and provide it with the
+                    // server side producer's id.
+                    callback({ id })
+                  })
+                } catch (error) {
+                  errback(error)
+                }
+              })
+
+              consumerTransport.current.on('connect', async ({ dtlsParameters }, callback, errback) => {
+                try {
+                  // Signal local DTLS parameters to the server side transport
+                  // see server's socket.on('transport-recv-connect', ...)
+                  await socket.emit('transport-recv-connect', {
+                    dtlsParameters,
+                  })
+          
+                  // Tell the transport that parameters were transmitted.
+                  callback()
+                } catch (error) {
+                  // Tell the transport that something was wrong
+                  errback(error)
+                }
+              })
             })
           }
         })
@@ -164,10 +214,11 @@ function App() {
       console.log("consumer created")
       // destructure and retrieve the video track from the producer
       const { track } = consumer
-  
-      const remoteStream = new MediaStream([track])
-      addParticipantVideo(remoteStream)
-      console.log("adding new participant video to ui")
+      console.log('track from consumer', track)
+      remoteStream.current.srcObject = new MediaStream([track])
+      console.log(remoteStream.current.srcObject, 'check state of remote stream', localStream.current.srcObject)
+      // addParticipantVideo('remote',remoteStream)
+      console.log("adding new participant video to ui", remoteStream)
       // the server consumer started with media paused
       // so we need to inform the server to resume
       socket.emit('consumer-resume', params.id)
@@ -197,19 +248,25 @@ function App() {
         </form>
       ) : null}
 
-      <div id="controls" style={{ display: 'none' }}></div>
-
-      {videos.map(({ id, stream }) => (
+      <div id="controls">
+      <video ref={localStream} autoPlay playsInline></video>
+      <video ref={remoteStream} autoPlay playsInline></video>
+      {/* {videos.map((video) => (
         <video
-          key={id}
-          ref={(video) => {
-            if (video) video.srcObject = stream;
+          key={video.id}
+          ref={(videoElement) => {
+            if (videoElement) {
+                videoElement.srcObject = video.stream;
+            }
           }}
           autoPlay
+          controls
           playsInline
         />
-      ))}
-      
+      ))} */}
+      </div>
+      <button onClick={(e)=>{connectSendTransport()}}>Produce</button>
+      <button onClick={(e)=>{connectRecvTransport()}}>Consume</button>
     </div>
   );
 }

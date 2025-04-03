@@ -36,3 +36,21 @@
     transform: rotate(360deg);
   }
 }
+
+video{
+  height: 400px;
+  width: 500px;
+  border:#282c34;
+  border-radius: 20px;
+}
+
+button{
+  padding: 5px;
+  width: 160px;
+  font-size: large;
+}
+
+input{
+  padding: 10px;
+  font-size: large;
+}
