@@ -82,7 +82,7 @@ io.on("connection", socket =>{
       transports.set(`${username}`, { producer: producerTransport, consumer: consumerTransport})
       console.log('transports for current user stored in map')
       producers.set(`${username}`,[])
-      consumers.set(`${username}`, [])
+      consumers.set(`${username}`, new Map())
       const producerOptions = {
         id: producerTransport.id,
         iceParameters: producerTransport.iceParameters,
@@ -146,45 +146,49 @@ io.on("connection", socket =>{
       console.log("current peers in the room", cur_peers, "cur username", username)
       cur_peers.forEach(async(peer)=>{
         if(peer!=username){
-          console.log(" inside if check foreach")
-          const consume_producer = producers.get(peer)[0]
-          if (router.canConsume({
-            producerId: consume_producer.id,
-            rtpCapabilities
-          })) {
-            // transport can now consume and return a consumer
-            console.log('router can consume', 'creating consumer for:', peer)
-            const cur_transports = transports.get(username)
-            consumer = await cur_transports.consumer.consume({
+          const existing_consumers = consumers.get(username)
+          if (!existing_consumers.has(peer)){
+            console.log(" inside if check foreach")
+            const consume_producer = producers.get(peer)[0]
+            if (router.canConsume({
               producerId: consume_producer.id,
-              rtpCapabilities,
-              paused: true,
-            })
-            const cur_consumers= consumers.get(username)
-            if(cur_consumers){
-              cur_consumers.push(consumer)
-              consumers.set(username, cur_consumers)
+              rtpCapabilities
+            })) {
+              // transport can now consume and return a consumer
+              console.log('router can consume', 'creating consumer for:', peer)
+              const cur_transports = transports.get(username)
+              consumer = await cur_transports.consumer.consume({
+                producerId: consume_producer.id,
+                rtpCapabilities,
+                paused: true,
+              })
+              const cur_consumers= consumers.get(username)
+              if(cur_consumers){
+                cur_consumers.set(peer, consumer)
+                consumers.set(username, cur_consumers)
+              }
+              console.log('consumer from map', consumers.get(username))
+              
+              consumer.on('transportclose', () => {
+                console.log('transport close from consumer')
+              })
+      
+              consumer.on('producerclose', () => {
+                console.log('producer of consumer closed')
+              })
+              // from the consumer extract the following params
+              // to send back to the Client
+              const params = {
+                user: peer,
+                id: consumer.id,
+                producerId: consume_producer.id,
+                kind: consumer.kind,
+                rtpParameters: consumer.rtpParameters,
+              }
+              console.log('consumer params', params)
+              // send the parameters to the client
+              callback({ params })
             }
-            console.log('consumer from map', consumers.get(username))
-            
-            consumer.on('transportclose', () => {
-              console.log('transport close from consumer')
-            })
-    
-            consumer.on('producerclose', () => {
-              console.log('producer of consumer closed')
-            })
-            // from the consumer extract the following params
-            // to send back to the Client
-            const params = {
-              id: consumer.id,
-              producerId: consume_producer.id,
-              kind: consumer.kind,
-              rtpParameters: consumer.rtpParameters,
-            }
-            console.log('consumer params', params)
-            // send the parameters to the client
-            callback({ params })
           }
         }
       })
@@ -201,9 +205,11 @@ io.on("connection", socket =>{
 
   socket.on('consumer-resume', async () => {
     console.log('consumer resume')
-    await consumer.resume()
+    const curConsumers = consumers.get(username)
+    await curConsumers.forEach(async(consumer)=>{
+      await consumer.resume()
+    })
   })
-
   })
 
 })

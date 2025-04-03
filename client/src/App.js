@@ -22,8 +22,6 @@ function App() {
   const [consumers, setConsumers] = useState([])
   const producerTransport = useRef(null)
   const consumerTransport = useRef(null)
-  const localStream = useRef(null)
-  const remoteStream = useRef(null)
   const [params, setParams] = useState({
     // mediasoup params
     encodings: [
@@ -52,8 +50,8 @@ function App() {
   //   }
   // }, [params.track]); // Run this effect when params.track changes
 
-  const addParticipantVideo = (id, stream) => {
-    setVideos((prevVideos) => [...prevVideos, { id, stream }]); // Store stream and ID
+  const addParticipantVideo = (user, id, stream) => {
+    setVideos((prevVideos) => [...prevVideos, { user, id, stream }]); // Store stream and ID
   };
 
   const removeParticipantVideo = (id) => {
@@ -68,7 +66,7 @@ function App() {
       if(username && roomId){
         navigator.mediaDevices.getUserMedia({ audio: false, video: true })
         .then(async (stream) => {
-          addParticipantVideo('local', stream);
+          addParticipantVideo(username,'local', stream);
           // localStream.current.srcObject = stream
           setIsVisible(false)
           const track = stream.getVideoTracks()[0]
@@ -218,7 +216,7 @@ function App() {
       let remoteStream = new MediaStream([track])
       // console.log(remoteStream.current.srcObject, 'check state of remote stream', localStream.current.srcObject)
       let video_id = Math.floor(Math.random() * 100)
-      addParticipantVideo(video_id,remoteStream)
+      addParticipantVideo(params.user, video_id,remoteStream)
       console.log("adding new participant video to ui", remoteStream)
       // the server consumer started with media paused
       // so we need to inform the server to resume
@@ -253,17 +251,33 @@ function App() {
       {/* <video ref={localStream} autoPlay playsInline></video>
       <video ref={remoteStream} autoPlay playsInline></video> */}
       {videos.map((video) => (
-        <video
-          key={video.id}
-          ref={(videoElement) => {
-            if (videoElement) {
-                videoElement.srcObject = video.stream;
-            }
-          }}
-          autoPlay
-          controls
-          playsInline
-        />
+        <div key={video.id} style={{ position: 'relative', display: 'inline-block', margin: '10px' }}>
+            <video
+                ref={(videoElement) => {
+                    if (videoElement) {
+                        videoElement.srcObject = video.stream;
+                    }
+                }}
+                autoPlay
+                controls
+                playsInline
+                style={{ width: '320px', height: '240px' }} // Adjust size as needed
+            />
+            <div
+                style={{
+                    position: 'absolute',
+                    top: '5px',
+                    right: '5px',
+                    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                    color: 'white',
+                    padding: '5px',
+                    borderRadius: '3px',
+                    fontSize: '14px',
+                }}
+            >
+                {video.user}
+            </div>
+        </div>
       ))}
       </div>
       <button onClick={(e)=>{connectSendTransport()}}>Produce</button>
