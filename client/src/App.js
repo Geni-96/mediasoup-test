@@ -68,8 +68,8 @@ function App() {
       if(username && roomId){
         navigator.mediaDevices.getUserMedia({ audio: false, video: true })
         .then(async (stream) => {
-          // addParticipantVideo('local', stream);
-          localStream.current.srcObject = stream
+          addParticipantVideo('local', stream);
+          // localStream.current.srcObject = stream
           setIsVisible(false)
           const track = stream.getVideoTracks()[0]
           console.log('printing local stream', stream)
@@ -215,9 +215,10 @@ function App() {
       // destructure and retrieve the video track from the producer
       const { track } = consumer
       console.log('track from consumer', track)
-      remoteStream.current.srcObject = new MediaStream([track])
-      console.log(remoteStream.current.srcObject, 'check state of remote stream', localStream.current.srcObject)
-      // addParticipantVideo('remote',remoteStream)
+      let remoteStream = new MediaStream([track])
+      // console.log(remoteStream.current.srcObject, 'check state of remote stream', localStream.current.srcObject)
+      let video_id = Math.floor(Math.random() * 100)
+      addParticipantVideo(video_id,remoteStream)
       console.log("adding new participant video to ui", remoteStream)
       // the server consumer started with media paused
       // so we need to inform the server to resume
@@ -249,9 +250,9 @@ function App() {
       ) : null}
 
       <div id="controls">
-      <video ref={localStream} autoPlay playsInline></video>
-      <video ref={remoteStream} autoPlay playsInline></video>
-      {/* {videos.map((video) => (
+      {/* <video ref={localStream} autoPlay playsInline></video>
+      <video ref={remoteStream} autoPlay playsInline></video> */}
+      {videos.map((video) => (
         <video
           key={video.id}
           ref={(videoElement) => {
@@ -263,7 +264,7 @@ function App() {
           controls
           playsInline
         />
-      ))} */}
+      ))}
       </div>
       <button onClick={(e)=>{connectSendTransport()}}>Produce</button>
       <button onClick={(e)=>{connectRecvTransport()}}>Consume</button>
