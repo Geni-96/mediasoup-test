@@ -1,0 +1,30 @@
+{
+  "name": "mediasoup-conf-mie",
+  "description": "This is a mediasoup based web conferencing app with socket.io for signalling",
+  "version": "1.0.0",
+  "main": "index.js",
+  "bin":{
+    "mediasoup-conf-mie": "./bin/start.js"
+  },
+  "scripts": {
+    "install": "cd client && npm install && cd ../server && npm install",
+    "start": "node bin/start.js"
+  },
+  "files":[
+    "bin",
+    "client",
+    "server"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Geni-96/mediasoup-test.git"
+  },
+  "keywords": ["webrtc", "video", "socket.io", "room based webrtc", "video conf", "mediasoup"],
+  "author": "Geni Lolugu",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Geni-96/mediasoup-test/issues"
+  },
+  "exclude": ["node_modules"]
+}
+

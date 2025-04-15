@@ -3,6 +3,8 @@ const express = require('express');
 const http = require('http');
 // const { mediasoup } = require('mediasoup');
 const cors = require('cors')
+require('dotenv').config();
+const redis = require('redis');
 const { createWorker, worker, getRouter } = require('./mediasoup-config');
 (async () => {
   await createWorker();
@@ -35,54 +37,87 @@ app.use((req, res, next) => {
     next();
 });
 
-const rooms = new Map()
+const client = redis.createClient({
+  username: 'default',
+  password: process.env.REDIS_PASSWORD,
+  socket: {
+      host: process.env.REDIS_HOST,
+      port: process.env.REDIS_PORT
+  }
+});
+
+
+client.on('error', err => console.log('Redis Client Error', err));
+
+
+(async () => {
+  await client.connect();
+  console.log('Connected to Redis');
+})();
+
+// const rooms = new Map()
 // const peers = io.of('/mediasoup')
-let router;
-let producerTransport
-let consumerTransport
+const routers = new Map;
+
 let producer
 let consumer
-let transports = new Map()
-let producers = new Map()
-let consumers = new Map()
 let room;
+const paramlist = []
+let producerInfo = new Map();
+let consumerInfo = new Map();
 io.on("connection", socket =>{
-  
+
   console.log('new peer connected', socket.id)
   socket.on('joinRoom', async ({ username, roomId }, callback) => {
-    room = rooms.get(roomId)
+    let router;
+    
+    producerInfo.set(`${roomId}:${username}`, new Map());
+    consumerInfo.set(`${roomId}:${username}`, new Map());
+    room = await client.exists(`room:${roomId}`);
     if(!room){
       console.log('creating a new room with id:', roomId, `Adding user:${username}`)
       router = await getRouter();
-      rooms.set(roomId, { router, peers: [] });
-      room = rooms.get(roomId)
-      if(rooms.has(roomId)){
-        room.peers.push(username)
+      routers.set(`${roomId}`, router)
+      if(router){
+        const roomData = {
+          peers: [username]
+        };
+        await client.set(`room:${roomId}`, JSON.stringify(roomData));
       }
     }
     else{
       console.log(`Adding ${username} to existing room ${roomId}`)
-      router = room.router
-      if(rooms.has(roomId)){
-        room = rooms.get(roomId)
-        room.peers.push(username)
+      const data = await client.get(`room:${roomId}`);
+      console.log(data, 'exiting room data')
+      if (data){
+        room = JSON.parse(data);
+        router = await routers.get(`${roomId}`)
+        console.log('router', router)
+        room.peers.push(username);
         socket.emit("newParticipant", room.peers)
         console.log("emiting event new participant and sending peers:", room.peers)
+        await client.set(`room:${roomId}`, JSON.stringify(room));
       }
     }
     
     //send router rtpcapabilities to client
-    const  rtpCapabilities= router.rtpCapabilities
-    callback({rtpCapabilities})
+    if(router){
+      const rtpCapabilities = router.rtpCapabilities
+      // console.log('rtp',rtpCapabilities)
+      callback({rtpCapabilities})
+    }
     //once we have the router, we create produce and consume transports for each
     socket.on("createWebRTCTransport",async(callback)=>{
       // create both producerTransport and consumer Transport
-      producerTransport = await createWebRtcTransport(router)
-      consumerTransport = await createWebRtcTransport(router)
-      transports.set(`${username}`, { producer: producerTransport, consumer: consumerTransport})
-      console.log('transports for current user stored in map')
-      producers.set(`${username}`,[])
-      consumers.set(`${username}`, new Map())
+      let producerTransport = await createWebRtcTransport(router)
+      let consumerTransport = await createWebRtcTransport(router)
+      producerInfo.get(`${roomId}:${username}`).set('producerTransport', producerTransport);
+      consumerInfo.get(`${roomId}:${username}`).set('consumerTransport', consumerTransport)
+      consumerInfo.get(`${roomId}:${username}`).set('consumers', new Map())
+      // transports.set(`${username}`, { producer: producerTransport, consumer: consumerTransport})
+      // console.log('transports for current user stored in map')
+      // await client.set(`producers:${roomId}${username}`,[])
+      
       const producerOptions = {
         id: producerTransport.id,
         iceParameters: producerTransport.iceParameters,
@@ -99,8 +134,8 @@ io.on("connection", socket =>{
     })
     // see client's socket.emit('transport-connect', ...)
   socket.on('transport-connect', async ({ dtlsParameters }) => {
-    console.log('DTLS PARAMS... ', { dtlsParameters },producerTransport)
-    await producerTransport.connect({ dtlsParameters })
+    // console.log('DTLS PARAMS... ', { dtlsParameters },producerTransport)
+    await producerInfo.get(`${roomId}:${username}`).get('producerTransport').connect({ dtlsParameters })
     console.log('producer connected')
   })
 
@@ -108,18 +143,12 @@ io.on("connection", socket =>{
   socket.on('transport-produce', async ({ kind, rtpParameters, appData }, callback) => {
     // call produce based on the prameters from the client
     console.log('producer producing')
-    producer = await producerTransport.produce({
+    producer = await producerInfo.get(`${roomId}:${username}`).get('producerTransport').produce({
       kind,
       rtpParameters,
     })
-    
-    console.log('Producer', producer.id, producer.kind)
-    const cur_producers= producers.get(username)
-    if(cur_producers){
-      cur_producers.push(producer)
-      producers.set(username, cur_producers)
-    }
-    console.log('producer from map', producers.get(username))
+    producerInfo.get(`${roomId}:${username}`).set('producer', producer)
+    console.log('producer from map', producerInfo)
     producer.on('transportclose', () => {
       console.log('transport for this producer closed ')
       producer.close()
@@ -134,40 +163,39 @@ io.on("connection", socket =>{
   // see client's socket.emit('transport-recv-connect', ...)
   socket.on('transport-recv-connect', async ({ dtlsParameters }) => {
     console.log(`DTLS PARAMS: ${dtlsParameters}`)
-    const currentTransports = transports.get(username)
-    await currentTransports.consumer.connect({ dtlsParameters })
+    const consumer = await consumerInfo.get(`${roomId}:${username}`).get('consumerTransport');
+    await consumer.connect({ dtlsParameters })
   })
 
   socket.on('consume', async ({ rtpCapabilities }, callback) => {
+    
+    const paramsList = []
     try {
       // check if the router can consume the specified producer
-      room = rooms.get(roomId)
+      let roomData = await client.get(`room:${roomId}`);
+      room = JSON.parse(roomData)
       const cur_peers = room.peers
       console.log("current peers in the room", cur_peers, "cur username", username)
-      cur_peers.forEach(async(peer)=>{
+      const consumers = consumerInfo.get(`${roomId}:${username}`).get('consumers')
+      for(const peer of cur_peers){
         if(peer!=username){
-          const existing_consumers = consumers.get(username)
-          if (!existing_consumers.has(peer)){
-            console.log(" inside if check foreach")
-            const consume_producer = producers.get(peer)[0]
+          if (!consumers.has(peer)){
+            console.log(`${peer} doesn't have a counsumer in ${username}`)
+            console.log('producerInfo', producerInfo)
+            producer = await producerInfo.get(`${roomId}:${peer}`).get('producer')
+            console.log('producer for ',peer, producer)
             if (router.canConsume({
-              producerId: consume_producer.id,
+              producerId: producer.id,
               rtpCapabilities
             })) {
               // transport can now consume and return a consumer
               console.log('router can consume', 'creating consumer for:', peer)
-              const cur_transports = transports.get(username)
-              consumer = await cur_transports.consumer.consume({
-                producerId: consume_producer.id,
+              consumer = await consumerInfo.get(`${roomId}:${username}`).get('consumerTransport').consume({
+                producerId: producer.id,
                 rtpCapabilities,
                 paused: true,
               })
-              const cur_consumers= consumers.get(username)
-              if(cur_consumers){
-                cur_consumers.set(peer, consumer)
-                consumers.set(username, cur_consumers)
-              }
-              console.log('consumer from map', consumers.get(username))
+              consumerInfo.get(`${roomId}:${username}`).get('consumers').set(`${peer}`, consumer)
               
               consumer.on('transportclose', () => {
                 console.log('transport close from consumer')
@@ -178,37 +206,31 @@ io.on("connection", socket =>{
               })
               // from the consumer extract the following params
               // to send back to the Client
-              const params = {
+              let params = {
                 user: peer,
                 id: consumer.id,
-                producerId: consume_producer.id,
+                producerId: producer.id,
                 kind: consumer.kind,
                 rtpParameters: consumer.rtpParameters,
+                resumed:false
               }
-              console.log('consumer params', params)
-              // send the parameters to the client
-              callback({ params })
+              paramsList.push(params);
             }
           }
         }
-      })
-      
+      }
+      console.log('paramsList afger callback', paramsList)
+      callback({paramsList:paramsList})
     } catch (error) {
+      paramsList.push({ error: `Could not consume: ${error.message}` });
       console.log(error.message)
-      callback({
-        params: {
-          error: error
-        }
-      })
+      callback({paramsList});
     }
   })
 
-  socket.on('consumer-resume', async () => {
+  socket.on('consumer-resume', async (user, consumerId) => {
     console.log('consumer resume')
-    const curConsumers = consumers.get(username)
-    await curConsumers.forEach(async(consumer)=>{
-      await consumer.resume()
-    })
+    consumerInfo.get(`${roomId}:${username}`).get('consumers').get(user).resume()
   })
   })
 
@@ -229,10 +251,9 @@ const createWebRtcTransport = async (router) => {
   });
 
   transport.on('close', () => {
-      console.log('Transport closed');
+      console.log('Transport closed')
   });
 
-  
   return transport;
 };
 

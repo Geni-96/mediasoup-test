@@ -153,15 +153,6 @@ function App() {
     }
   }
 
-  // socket.on('newParticipant', async(peers)=>{
-  //   if (producerTransport.current && consumerTransport.current){
-  //     peers.forEach((peer)=>{
-  //       connectSendTransport
-  //       connectRecvTransport
-  //     })
-  //   }
-  // })
-
    async function connectSendTransport() {
     // we now call produce() to instruct the producer transport
     // to send media to the Router
@@ -193,35 +184,47 @@ function App() {
     console.log("connecting recv transport and start consuming")
     await socket.emit('consume', {
       rtpCapabilities: curDevice.current.rtpCapabilities,
-    }, async ({ params }) => {
-      if (params.error) {
-        console.log('Cannot Consume')
-        return
-      }
+    }, async ({ paramsList }) => {
   
-      console.log(params)
+      console.log(paramsList)
       // then consume with the local consumer transport
       // which creates a consumer
-      const consumer = await consumerTransport.current.consume({
-        id: params.id,
-        producerId: params.producerId,
-        kind: params.kind,
-        rtpParameters: params.rtpParameters
-      })
-      setConsumers((prevConsumers) => [...prevConsumers, consumer])
-      console.log("consumer created")
-      // destructure and retrieve the video track from the producer
-      const { track } = consumer
-      console.log('track from consumer', track)
-      let remoteStream = new MediaStream([track])
-      // console.log(remoteStream.current.srcObject, 'check state of remote stream', localStream.current.srcObject)
-      let video_id = Math.floor(Math.random() * 100)
-      addParticipantVideo(params.user, video_id,remoteStream)
-      console.log("adding new participant video to ui", remoteStream)
-      // the server consumer started with media paused
-      // so we need to inform the server to resume
-      socket.emit('consumer-resume', params.id)
+      try{
+        paramsList.forEach(async(params)=>{
+          if(params.error){
+            console.log('error consuming', params.error)
+            return
+          }
+          console.log('paramlist for each')
+          const consumer = await consumerTransport.current.consume({
+            id: params.id,
+            producerId: params.producerId,
+            kind: params.kind,
+            rtpParameters: params.rtpParameters
+          })
+          setConsumers((prevConsumers) => [...prevConsumers, consumer])
+          console.log("consumer created")
+          // destructure and retrieve the video track from the producer
+          const { track } = consumer
+          console.log('track from consumer', track)
+          let remoteStream = new MediaStream([track])
+          // console.log(remoteStream.current.srcObject, 'check state of remote stream', localStream.current.srcObject)
+          let video_id = Math.floor(Math.random() * 100)
+          addParticipantVideo(params.user, video_id,remoteStream)
+          console.log("adding new participant video to ui", remoteStream)
+          // the server consumer started with media paused
+          // so we need to inform the server to resume
+          socket.emit('consumer-resume', params.user, params.id)
+        })
+      }catch(error){
+        console.log(error)
+      }      
     })
+  }
+
+  async function handleHangup(){
+    console.log('Exising user from call:', username)
+    io.emit('hangup', username)
   }
 
   return (
@@ -282,6 +285,7 @@ function App() {
       </div>
       <button onClick={(e)=>{connectSendTransport()}}>Produce</button>
       <button onClick={(e)=>{connectRecvTransport()}}>Consume</button>
+      <button onClick={(e)=>{handleHangup()}}>Hangup</button>
     </div>
   );
 }
