@@ -17,8 +17,8 @@
     "web-vitals": "^2.1.4"
   },
   "overrides": {
-  "fake-mediastreamtrack": {
-    "uuid": "^8.3.2"
+    "fake-mediastreamtrack": {
+      "uuid": "^8.3.2"
     }
   },
   "scripts": {
@@ -44,5 +44,9 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.1.4",
+    "tailwindcss": "^4.1.4"
   }
 }

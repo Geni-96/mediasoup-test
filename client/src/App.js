@@ -1,4 +1,3 @@
-import './App.css';
 import { React, useState, useRef, useEffect } from 'react';
 import { io } from "socket.io-client";
 import { Device } from "mediasoup-client";
@@ -17,9 +16,8 @@ function App() {
   const [roomId, setRoomId] = useState('')
   const [videos, setVideos] = useState([]);
   const [isVisible, setIsVisible] = useState(true)
+  const [meetingEnded, setMeetingEnded] = useState(false)
   const curDevice = useRef(null)
-  const [producers, setProducers] = useState([])
-  const [consumers, setConsumers] = useState([])
   const producerTransport = useRef(null)
   const consumerTransport = useRef(null)
   const [params, setParams] = useState({
@@ -54,8 +52,9 @@ function App() {
     setVideos((prevVideos) => [...prevVideos, { user, id, stream }]); // Store stream and ID
   };
 
-  const removeParticipantVideo = (id) => {
-    setVideos((prevVideos) => prevVideos.filter((video) => video.id !== id)); // Remove participant by ID
+  const removeParticipantVideo = (user) => {
+    console.log('removing video from ui')
+    setVideos((prevVideos) => prevVideos.filter((video) => video.user !== user)); // Remove participant by username
   };
   const handleSubmit = async(e) =>{
     e.preventDefault()
@@ -161,7 +160,6 @@ function App() {
     try{
       console.log("connecting send transport and start producing", params)
       const producer = await producerTransport.current.produce(params)
-      setProducers((prevProducers) => [...prevProducers, producer])
 
       producer.on('trackended', () => {
         console.log('track ended')
@@ -202,7 +200,6 @@ function App() {
             kind: params.kind,
             rtpParameters: params.rtpParameters
           })
-          setConsumers((prevConsumers) => [...prevConsumers, consumer])
           console.log("consumer created")
           // destructure and retrieve the video track from the producer
           const { track } = consumer
@@ -223,69 +220,117 @@ function App() {
   }
 
   async function handleHangup(){
-    console.log('Exising user from call:', username)
-    io.emit('hangup', username)
+    console.log('Exiting user from call:', username)
+    socket.emit('hangup', {roomId, username});
+    delPeerTransports()
   }
 
-  return (
-    <div className="App">
-      {isVisible ? (
-        <form id="join-screen" onSubmit={handleSubmit}>
-          <h2>Join Room</h2>
-          <input
-            type="text"
-            id="username"
-            placeholder="Enter your name"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-          />
-          <input
-            type="text"
-            id="room-id"
-            placeholder="Enter room ID"
-            value={roomId}
-            onChange={(e) => setRoomId(e.target.value)}
-          />
-          <button id="join-button">Join</button>
-        </form>
-      ) : null}
+  async function delPeerTransports(){
+    console.log('deleting tranports for:',username)
+    try{
+      
+      producerTransport.current.close()
+      consumerTransport.current.close()
+      const localStream = videos.find(video => video.user === username)?.stream
+      console.log(localStream, 'local video for me')
+      localStream.getTracks().forEach(track => track.stop());
+    }catch(error){
+      console.error('error deleting transports for ', username, error)
+    }
+    
+  }
 
-      <div id="controls">
-      {/* <video ref={localStream} autoPlay playsInline></video>
-      <video ref={remoteStream} autoPlay playsInline></video> */}
-      {videos.map((video) => (
-        <div key={video.id} style={{ position: 'relative', display: 'inline-block', margin: '10px' }}>
-            <video
-                ref={(videoElement) => {
-                    if (videoElement) {
-                        videoElement.srcObject = video.stream;
-                    }
-                }}
-                autoPlay
-                controls
-                playsInline
-                style={{ width: '320px', height: '240px' }} // Adjust size as needed
-            />
-            <div
-                style={{
-                    position: 'absolute',
-                    top: '5px',
-                    right: '5px',
-                    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-                    color: 'white',
-                    padding: '5px',
-                    borderRadius: '3px',
-                    fontSize: '14px',
-                }}
-            >
-                {video.user}
-            </div>
+  async function handleEndMeet() {
+    socket.emit('end-meeting', roomId)
+    delPeerTransports()
+    setMeetingEnded(true)
+  }
+
+  socket.on('remove video', user=>{
+    removeParticipantVideo(user)
+  })
+
+  socket.on("remove-all-videos",()=>{
+    setVideos([])
+    setMeetingEnded(true)
+  })
+
+  return (
+    <div className="flex items-center justify-center">
+      {meetingEnded ? 
+        <div className="w-full h-screen bg-linear-to-br from-gray-300 to-gray-600">
+        <h1 className="text-3xl md:text-5xl lg:7xl font-semibold absolute -translate-x-1/2 -translate-y-1/2 top-2/4 left-1/2">Thank you</h1>
         </div>
-      ))}
-      </div>
-      <button onClick={(e)=>{connectSendTransport()}}>Produce</button>
-      <button onClick={(e)=>{connectRecvTransport()}}>Consume</button>
-      <button onClick={(e)=>{handleHangup()}}>Hangup</button>
+        : 
+        (<div className="container my-10">
+          {isVisible ? (
+            <form id="join-screen" onSubmit={handleSubmit} className="max-w-9/10 md:max-w-sm mx-auto my-4 p-4 border-2 border-gray-200">
+              <h2 className="dark:text-white text-2xl font-semibold ml-[30%] my-4">Join Room</h2>
+              <label className="dark:text-white my-8">
+                Display name:
+                <input
+                type="text"
+                id="username"
+                placeholder="Enter your name"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                />
+              </label>
+              <label className="dark:text-white my-8">
+                Room number to join:
+                <input
+                type="text"
+                id="room-id"
+                placeholder="Enter room ID"
+                value={roomId}
+                onChange={(e) => setRoomId(e.target.value)}
+                />
+              </label>
+              <button id="join-button" className="mt-6 block w-full select-none rounded-lg hover:bg-gray-500 py-3 px-6 text-center align-middle bg-gray-50 border border-gray-300 text-gray-900 font-bold uppercase text-white shadow-md shadow-gray-500/20 dark:bg-gray-600 dark:border-gray-300">Join Meeting</button>
+            </form>
+          ) : null}
+
+          <div className={`grid gap-2 my-4 mx-10 place-items-center ${videos.length === 1 ? "grid-cols-1" : ""} ${videos.length === 2 ? "grid-cols-2" : ""} ${videos.length > 2 ? "grid-cols-3" : ""}`}>
+            {videos.map((video) => (
+              <div key={video.id} className="video-frame">
+                <video
+                    ref={(videoElement) => {
+                        if (videoElement) {
+                            videoElement.srcObject = video.stream;
+                        }
+                    }}
+                    autoPlay
+                    playsInline
+                    muted={video.user === username}
+                    // style={{ width: '320px', height: '240px' }} // Adjust size as needed
+                />
+              <div className="video-username"
+                // style={{
+                //   position: 'absolute',
+                //   top: '5px',
+                //   right: '5px',
+                //   backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                //   color: 'white',
+                //   padding: '5px',
+                //   borderRadius: '3px',
+                //   fontSize: '14px',
+                // }}
+              >
+              {video.user}
+              </div>
+          </div>
+        ))}
+        </div>
+        {isVisible ? null : 
+          <div className="flex items-center justify-center gap-2 md:gap-6 mt-2">
+          <button onClick={(e)=>{connectSendTransport()}} className="custom-button">Produce</button>
+          <button onClick={(e)=>{connectRecvTransport()}} className="custom-button">Consume</button>
+          <button onClick={(e)=>{handleHangup()}} className="custom-button">Leave</button>
+          <button onClick={(e)=>{handleEndMeet()}} className="custom-button">End Meeting</button>
+        </div>}
+        
+      </div>)
+      }
     </div>
   );
 }
