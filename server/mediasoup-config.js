@@ -16,8 +16,14 @@
        console.error('MediaSoup worker has died');
        setTimeout(() => process.exit(1), 2000) // exit in 2 seconds
      });
+   };
 
-     router = await worker.createRouter({ mediaCodecs: [
+   // Getter function to safely access `router`
+const getRouter = async() => {
+    if (!worker) {
+      throw new Error("Router is not initialized. Make sure `createWorker()` has been called.");
+    }else if(!router || router.closed){
+      router = await worker.createRouter({ mediaCodecs: [
         {
           kind: 'audio',
           mimeType: 'audio/opus',
@@ -30,12 +36,6 @@
           clockRate: 90000
         }
       ] });
-   };
-
-   // Getter function to safely access `router`
-const getRouter = () => {
-    if (!router) {
-      throw new Error("Router is not initialized. Make sure `createWorker()` has been called.");
     }
     return router;
   };

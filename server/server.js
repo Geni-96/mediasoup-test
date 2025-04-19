@@ -147,13 +147,13 @@ io.on("connection", socket =>{
   // see client's socket.emit('transport-produce', ...)
   socket.on('transport-produce', async ({ kind, rtpParameters, appData }, callback) => {
     // call produce based on the prameters from the client
-    console.log('producer producing')
+    console.log('producer producing', kind)
     producer = await producerInfo.get(`${roomId}:${username}`).get('producerTransport').produce({
       kind,
       rtpParameters,
     })
-    producerInfo.get(`${roomId}:${username}`).set('producer', producer)
-    console.log('producer from map', producerInfo)
+    producerInfo.get(`${roomId}:${username}`).set(`${kind}:producer`, producer)
+    // console.log('producer from map', producerInfo)
     producer.on('transportclose', () => {
       console.log('transport for this producer closed ')
       producer.close()
@@ -182,44 +182,54 @@ io.on("connection", socket =>{
       const cur_peers = room.peers
       console.log("current peers in the room", cur_peers, "cur username", username)
       const consumers = consumerInfo.get(`${roomId}:${username}`).get('consumers')
+      
+      async function createConsumers(curProducer, curPeer){
+        if (router.canConsume({
+          producerId: curProducer.id,
+          rtpCapabilities
+        })) {
+          // transport can now consume and return a consumer
+          console.log('router can consume', 'creating consumer for:', curPeer)
+          consumer = await consumerInfo.get(`${roomId}:${username}`).get('consumerTransport').consume({
+            producerId: curProducer.id,
+            rtpCapabilities,
+            paused: true,
+          })
+          consumerInfo.get(`${roomId}:${username}`).get('consumers').set(`${curPeer}`, consumer)
+          
+          consumer.on('transportclose', () => {
+            console.log('transport close for consumer')
+          })
+  
+          consumer.on('producerclose', () => {
+            console.log('producer of consumer closed')
+          })
+          // from the consumer extract the following params
+          // to send back to the Client
+          let params = {
+            user: curPeer,
+            id: consumer.id,
+            producerId: producer.id,
+            kind: consumer.kind,
+            rtpParameters: consumer.rtpParameters,
+            resumed:false
+          }
+          paramsList.push(params);
+        }
+      }
       for(const peer of cur_peers){
         if(peer!=username){
           if (!consumers.has(peer)){
             console.log(`${peer} doesn't have a counsumer in ${username}`)
             // console.log('producerInfo', producerInfo)
-            producer = await producerInfo.get(`${roomId}:${peer}`).get('producer')
+            let audioProducer = await producerInfo.get(`${roomId}:${peer}`).get('audio:producer')
+            let videoProducer = await producerInfo.get(`${roomId}:${peer}`).get('video:producer')
             // console.log('producer for ',peer, producer)
-            if (router.canConsume({
-              producerId: producer.id,
-              rtpCapabilities
-            })) {
-              // transport can now consume and return a consumer
-              console.log('router can consume', 'creating consumer for:', peer)
-              consumer = await consumerInfo.get(`${roomId}:${username}`).get('consumerTransport').consume({
-                producerId: producer.id,
-                rtpCapabilities,
-                paused: true,
-              })
-              consumerInfo.get(`${roomId}:${username}`).get('consumers').set(`${peer}`, consumer)
-              
-              consumer.on('transportclose', () => {
-                console.log('transport close from consumer')
-              })
-      
-              consumer.on('producerclose', () => {
-                console.log('producer of consumer closed')
-              })
-              // from the consumer extract the following params
-              // to send back to the Client
-              let params = {
-                user: peer,
-                id: consumer.id,
-                producerId: producer.id,
-                kind: consumer.kind,
-                rtpParameters: consumer.rtpParameters,
-                resumed:false
-              }
-              paramsList.push(params);
+            if (audioProducer) {
+              await createConsumers(audioProducer, peer)
+            }
+            if (videoProducer) {
+              await createConsumers(videoProducer, peer)
             }
           }
         }
@@ -287,6 +297,7 @@ io.on("connection", socket =>{
       console.log(result, 'result of deleting room data from redis')
       //close router
       router.close()
+      router = null;
     }
   })
   })
@@ -316,10 +327,10 @@ const createWebRtcTransport = async (router) => {
 
 const delPeerTransports = async(roomId, uname) =>{
   try{
-    const userProducer = producerInfo.get(`${roomId}:${uname}`).get('producer');
+    console.log('deleting producers, consumers, transports for:', uname)
+    await producerInfo.get(`${roomId}:${uname}`).get('video:producer').close();
+    await producerInfo.get(`${roomId}:${uname}`).get('audio:producer').close();
     const userConsumers = consumerInfo.get(`${roomId}:${uname}`).get('consumers') || {};
-    // Close all producers
-    userProducer.close()
 
     // Close all consumers
     for (const peerId in userConsumers) {

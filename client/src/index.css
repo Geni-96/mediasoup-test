@@ -299,8 +299,8 @@
   .border-gray-600 {
     border-color: var(--color-gray-600);
   }
-  .bg-gray-50 {
-    background-color: var(--color-gray-50);
+  .bg-gray-300 {
+    background-color: var(--color-gray-300);
   }
   .bg-linear-to-br {
     --tw-gradient-position: to bottom right;
@@ -391,19 +391,19 @@
       line-height: var(--tw-leading, var(--text-5xl--line-height));
     }
   }
+  .dark\:border-gray-50 {
+    @media (prefers-color-scheme: dark) {
+      border-color: var(--color-gray-50);
+    }
+  }
   .dark\:border-gray-200 {
     @media (prefers-color-scheme: dark) {
       border-color: var(--color-gray-200);
     }
   }
-  .dark\:border-gray-300 {
+  .dark\:bg-gray-800 {
     @media (prefers-color-scheme: dark) {
-      border-color: var(--color-gray-300);
-    }
-  }
-  .dark\:bg-gray-600 {
-    @media (prefers-color-scheme: dark) {
-      background-color: var(--color-gray-600);
+      background-color: var(--color-gray-800);
     }
   }
   .dark\:text-white {
