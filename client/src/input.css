@@ -45,7 +45,7 @@ input{
       @apply bg-transparent text-black hover:bg-gray-500 dark:text-white font-semibold hover:text-white py-2 px-4 border border-gray-500 dark:border-white hover:border-transparent rounded-lg;
     }
     input{
-      @apply shadow-xs w-full bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 my-1 dark:bg-gray-300 dark:border-gray-600 placeholder-gray-500 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500;
+      @apply shadow-xs w-full bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 my-1 dark:bg-gray-300 dark:border-gray-600 placeholder-gray-500 dark:bg-gray-700 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500;
     }
   }
 

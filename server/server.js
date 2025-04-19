@@ -110,6 +110,10 @@ io.on("connection", socket =>{
     //once we have the router, we create produce and consume transports for each
     socket.on("createWebRTCTransport",async(callback)=>{
       // create both producerTransport and consumer Transport
+      if(!router){
+        console.log('Failed to fetch router for this room')
+        return
+      }
       let producerTransport = await createWebRtcTransport(router)
       let consumerTransport = await createWebRtcTransport(router)
       producerInfo.get(`${roomId}:${username}`).set('producerTransport', producerTransport);
@@ -163,7 +167,7 @@ io.on("connection", socket =>{
 
   // see client's socket.emit('transport-recv-connect', ...)
   socket.on('transport-recv-connect', async ({ dtlsParameters }) => {
-    console.log(`DTLS PARAMS: ${dtlsParameters}`)
+    // console.log(`DTLS PARAMS: ${dtlsParameters}`)
     const consumer = await consumerInfo.get(`${roomId}:${username}`).get('consumerTransport');
     await consumer.connect({ dtlsParameters })
   })
@@ -182,9 +186,9 @@ io.on("connection", socket =>{
         if(peer!=username){
           if (!consumers.has(peer)){
             console.log(`${peer} doesn't have a counsumer in ${username}`)
-            console.log('producerInfo', producerInfo)
+            // console.log('producerInfo', producerInfo)
             producer = await producerInfo.get(`${roomId}:${peer}`).get('producer')
-            console.log('producer for ',peer, producer)
+            // console.log('producer for ',peer, producer)
             if (router.canConsume({
               producerId: producer.id,
               rtpCapabilities
@@ -220,7 +224,7 @@ io.on("connection", socket =>{
           }
         }
       }
-      console.log('paramsList after callback', paramsList)
+      // console.log('paramsList after callback', paramsList)
       callback({paramsList:paramsList})
     } catch (error) {
       paramsList.push({ error: `Could not consume: ${error.message}` });
@@ -233,12 +237,10 @@ io.on("connection", socket =>{
     console.log('consumer resume')
     consumerInfo.get(`${roomId}:${username}`).get('consumers').get(user).resume()
   })
-
-  })
-  socket.on('hangup', async({roomId, username}) =>{
+  socket.on('hangup', async(uname) =>{
     console.log("on one peer left")
-    socket.to(roomId).emit('remove video', username)
-    delPeerTransports(roomId, username)
+    socket.to(roomId).emit('remove video', uname)
+    delPeerTransports(roomId, uname)
 
     //remove peer from redis
     const roomKey = `room:${roomId}`
@@ -248,33 +250,45 @@ io.on("connection", socket =>{
       const roomData = JSON.parse(data);
       
       // Remove the peer from the array
-      roomData.peers = roomData.peers.filter(peer => peer !== username);
+      roomData.peers = roomData.peers.filter(peer => peer !== uname);
       console.log('filetered peers', roomData.peers)
+      if(roomData.peers.length===1){
+        // io.to(roomId).emit("end-meeting")
+        io.to(roomId).emit("remove video", roomData.peers[0])
+        delPeerTransports(roomId,username)
+        const result = await client.del(`room:${roomId}`);
+        console.log(result, 'result of deleting room data from redis')
+        //close router
+        router.close()
+        return
+      }
       // Update the Redis entry
       await client.set(roomKey, JSON.stringify(roomData));
 
-      console.log(`Removed ${username} from room ${roomId}`);
+      console.log(`Removed ${uname} from room ${roomId}`);
     } else {
-      console.log(`Room ${roomId} or ${username} not found in Redis`);
+      console.log(`Room ${roomId} or ${uname} not found in Redis`);
     }
 
   })
 
-  socket.on("end-meeting",async(roomId)=>{
-    socket.to(roomId).emit("remove-all-videos")
+  socket.on("end-meeting",async()=>{
+    io.to(roomId).emit("remove-all-videos")
     console.log('ending the meeting in ', roomId)
     const data = await client.get(`room:${roomId}`);
     if(data){
       const {peers} = JSON.parse(data)
-      for(let peer in peers){
-        console.log('About to delete peer transports for:', roomId, peer)
+      // console.log(peers)
+      for(const peer of peers){
+        console.log('About to delete peer transports for:', roomId, peer, 'inside end meet for loop')
         delPeerTransports(roomId, peer)
       }
       const result = await client.del(`room:${roomId}`);
       console.log(result, 'result of deleting room data from redis')
       //close router
-
+      router.close()
     }
+  })
   })
 
 })
@@ -300,19 +314,12 @@ const createWebRtcTransport = async (router) => {
   return transport;
 };
 
-const delPeerTransports = async(roomId, username) =>{
+const delPeerTransports = async(roomId, uname) =>{
   try{
-    const userProducers = producerInfo.get(`${roomId}:${username}`) || {};
-    const userConsumers = consumerInfo.get(`${roomId}:${username}`).get('consumers') || {};
-
+    const userProducer = producerInfo.get(`${roomId}:${uname}`).get('producer');
+    const userConsumers = consumerInfo.get(`${roomId}:${uname}`).get('consumers') || {};
     // Close all producers
-    for (const producer of Object.values(userProducers)) {
-      try {
-        producer.close();
-      } catch (err) {
-        console.error("Error closing producer", err);
-      }
-    }
+    userProducer.close()
 
     // Close all consumers
     for (const peerId in userConsumers) {
@@ -325,13 +332,14 @@ const delPeerTransports = async(roomId, username) =>{
       }
     }
 
-    await producerInfo.get(`${roomId}:${username}`).get('producerTransport').close()
-    await consumerInfo.get(`${roomId}:${username}`).get('consumerTransport').close()
-    producerInfo.delete(`${roomId}:${username}`)
-    consumerInfo.delete(`${roomId}:${username}`)
+    console.log(producerInfo.get(`${roomId}:${uname}`))
+    producerInfo.get(`${roomId}:${uname}`).get('producerTransport').close();
+    consumerInfo.get(`${roomId}:${uname}`).get('consumerTransport').close();
+    producerInfo.delete(`${roomId}:${uname}`)
+    consumerInfo.delete(`${roomId}:${uname}`)
   }
   catch(error){
-    console.log("Error in deleting peer transports for:", username, roomId, error)
+    console.log("Error in deleting peer transports for:", uname, roomId, error)
   }
 }
 

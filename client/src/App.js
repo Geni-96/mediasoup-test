@@ -53,9 +53,13 @@ function App() {
   };
 
   const removeParticipantVideo = (user) => {
-    console.log('removing video from ui')
     setVideos((prevVideos) => prevVideos.filter((video) => video.user !== user)); // Remove participant by username
+    if(user===username){
+      delPeerTransports()
+      setMeetingEnded(true)
+    }
   };
+
   const handleSubmit = async(e) =>{
     e.preventDefault()
     let device;
@@ -63,16 +67,18 @@ function App() {
 
     try{
       if(username && roomId){
-        navigator.mediaDevices.getUserMedia({ audio: false, video: true })
+        navigator.mediaDevices.getUserMedia({ audio: true, video: true })
         .then(async (stream) => {
           addParticipantVideo(username,'local', stream);
           // localStream.current.srcObject = stream
           setIsVisible(false)
-          const track = stream.getVideoTracks()[0]
-          console.log('printing local stream', stream)
+          const videoTrack = stream.getVideoTracks()[0]
+          const audioTrack = stream.getAudioTracks()[0]
+          // console.log('printing local stream', stream)
           setParams(prevParams => ({
             ...prevParams,
-            track: track
+            videoTrack: videoTrack,
+            audioTrack: audioTrack
         })
       );
         })
@@ -203,7 +209,7 @@ function App() {
           console.log("consumer created")
           // destructure and retrieve the video track from the producer
           const { track } = consumer
-          console.log('track from consumer', track)
+          // console.log('track from consumer', track)
           let remoteStream = new MediaStream([track])
           // console.log(remoteStream.current.srcObject, 'check state of remote stream', localStream.current.srcObject)
           let video_id = Math.floor(Math.random() * 100)
@@ -221,8 +227,11 @@ function App() {
 
   async function handleHangup(){
     console.log('Exiting user from call:', username)
-    socket.emit('hangup', {roomId, username});
+    socket.emit('hangup', username);
     delPeerTransports()
+    setMeetingEnded(true)
+    setVideos([])
+    console.log('emitng hangup username', username)
   }
 
   async function delPeerTransports(){
@@ -241,9 +250,7 @@ function App() {
   }
 
   async function handleEndMeet() {
-    socket.emit('end-meeting', roomId)
-    delPeerTransports()
-    setMeetingEnded(true)
+    socket.emit('end-meeting')
   }
 
   socket.on('remove video', user=>{
@@ -253,6 +260,7 @@ function App() {
   socket.on("remove-all-videos",()=>{
     setVideos([])
     setMeetingEnded(true)
+    delPeerTransports()
   })
 
   return (
@@ -264,7 +272,7 @@ function App() {
         : 
         (<div className="container my-10">
           {isVisible ? (
-            <form id="join-screen" onSubmit={handleSubmit} className="max-w-9/10 md:max-w-sm mx-auto my-4 p-4 border-2 border-gray-200">
+            <form id="join-screen" onSubmit={handleSubmit} className="max-w-9/10 md:max-w-sm mx-auto my-4 p-4 border-2 dark:border-gray-200 border-gray-600">
               <h2 className="dark:text-white text-2xl font-semibold ml-[30%] my-4">Join Room</h2>
               <label className="dark:text-white my-8">
                 Display name:
@@ -286,7 +294,7 @@ function App() {
                 onChange={(e) => setRoomId(e.target.value)}
                 />
               </label>
-              <button id="join-button" className="mt-6 block w-full select-none rounded-lg hover:bg-gray-500 py-3 px-6 text-center align-middle bg-gray-50 border border-gray-300 text-gray-900 font-bold uppercase text-white shadow-md shadow-gray-500/20 dark:bg-gray-600 dark:border-gray-300">Join Meeting</button>
+              <button id="join-button" className="mt-6 block w-full select-none rounded-lg hover:bg-gray-600 py-3 px-6 text-center align-middle bg-gray-50 border border-gray-300 text-gray-900 font-bold uppercase shadow-md shadow-gray-500/20 dark:bg-gray-600 dark:border-gray-300">Join Meeting</button>
             </form>
           ) : null}
 
