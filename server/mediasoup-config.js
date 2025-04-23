@@ -9,6 +9,7 @@
 
    let worker;
    let router;
+   const routers = new Map();
 
    const createWorker = async () => {
      worker = await mediasoup.createWorker(workerSettings);
@@ -19,10 +20,22 @@
    };
 
    // Getter function to safely access `router`
-const getRouter = async() => {
+const getRouter = async(roomId) => {
     if (!worker) {
       throw new Error("Router is not initialized. Make sure `createWorker()` has been called.");
-    }else if(!router || router.closed){
+    }else{
+      let curRouter = routers.get(roomId);
+      if(!curRouter || curRouter.closed){
+        curRouter = await createRouter(roomId);
+      }
+      return curRouter;
+    }
+  };
+
+  const createRouter = async(roomId) => {
+    if (!worker) {
+      throw new Error("Router is not initialized. Make sure `createWorker()` has been called.");
+    }else{
       router = await worker.createRouter({ mediaCodecs: [
         {
           kind: 'audio',
@@ -37,7 +50,7 @@ const getRouter = async() => {
         }
       ] });
     }
+    routers.set(`${roomId}`, router);
     return router;
   };
-
-   module.exports = { createWorker, worker, getRouter };
+   module.exports = { createWorker, getRouter };

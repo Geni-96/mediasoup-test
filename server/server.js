@@ -5,7 +5,7 @@ const http = require('http');
 const cors = require('cors')
 require('dotenv').config();
 const redis = require('redis');
-const { createWorker, worker, getRouter } = require('./mediasoup-config');
+const { createWorker, getRouter } = require('./mediasoup-config');
 (async () => {
   await createWorker();
 })();
@@ -57,8 +57,6 @@ client.on('error', err => console.log('Redis Client Error', err));
 
 // const rooms = new Map()
 // const peers = io.of('/mediasoup')
-const routers = new Map;
-
 let producer
 let consumer
 let room;
@@ -77,8 +75,8 @@ io.on("connection", socket =>{
     room = await client.exists(`room:${roomId}`);
     if(!room){
       console.log('creating a new room with id:', roomId, `Adding user:${username}`)
-      router = await getRouter();
-      routers.set(`${roomId}`, router)
+      router = await getRouter(roomId);
+      console.log('router',router)
       if(router){
         const roomData = {
           peers: [username]
@@ -92,7 +90,7 @@ io.on("connection", socket =>{
       console.log(data, 'exiting room data')
       if (data){
         room = JSON.parse(data);
-        router = await routers.get(`${roomId}`)
+        router = await getRouter(roomId);
         console.log('router', router)
         room.peers.push(username);
         socket.emit("newParticipant", room.peers)
@@ -103,8 +101,8 @@ io.on("connection", socket =>{
     
     //send router rtpcapabilities to client
     if(router){
-      const rtpCapabilities = router.rtpCapabilities
-      // console.log('rtp',rtpCapabilities)
+      const rtpCapabilities = await router.rtpCapabilities
+      console.log('rtp',rtpCapabilities)
       callback({rtpCapabilities})
     }
     //once we have the router, we create produce and consume transports for each

@@ -66,20 +66,21 @@ function App() {
     try{
       if(username && roomId){
         navigator.mediaDevices.getUserMedia({ 
-          audio: true, 
+          // audio: false, 
           video: true, 
-          audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          googEchoCancellation: true,
-          googAutoGainControl: true,
-          googNoiseSuppression: true,
-          googHighpassFilter: true,
-          googTypingNoiseDetection: true,
-          googNoiseReduction: true,
-          volume: 1.0,
-          }, })
+          // audio: {
+          // echoCancellation: true,
+          // noiseSuppression: true,
+          // autoGainControl: true,
+          // googEchoCancellation: true,
+          // googAutoGainControl: true,
+          // googNoiseSuppression: true,
+          // googHighpassFilter: true,
+          // googTypingNoiseDetection: true,
+          // googNoiseReduction: true,
+          // volume: 1.0,
+          // }, 
+          })
         .then(async (stream) => {
           addParticipantVideo(username,'local', stream);
           // localStream.current.srcObject = stream
