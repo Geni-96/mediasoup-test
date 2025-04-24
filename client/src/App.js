@@ -23,6 +23,11 @@ function App() {
   const consumers = useRef({});
   const consumerTransport = useRef(null)
   const [sendTransportConnected, setSendTransportConnected] = useState(false);
+  const localStream = useRef(null)
+  const [isAudioMuted, setIsAudioMuted] = useState(null)
+  const [isVideoPaused, setIsVideoPaused] = useState(null)
+  const [micIcon, setMicIcon] = useState("mic-24.png")
+  const [camIcon, setCamIcon] = useState("video-24.png")
   const [params, setParams] = useState({
     video: {
       track: null,
@@ -72,24 +77,25 @@ function App() {
     try{
       if(username && roomId){
         navigator.mediaDevices.getUserMedia({ 
-          // audio: false, 
+          audio: false, 
           video: true, 
-          // audio: {
-          // echoCancellation: true,
-          // noiseSuppression: true,
-          // autoGainControl: true,
-          // googEchoCancellation: true,
-          // googAutoGainControl: true,
-          // googNoiseSuppression: true,
-          // googHighpassFilter: true,
-          // googTypingNoiseDetection: true,
-          // googNoiseReduction: true,
-          // volume: 1.0,
-          // }, 
+          audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          googEchoCancellation: true,
+          googAutoGainControl: true,
+          googNoiseSuppression: true,
+          googHighpassFilter: true,
+          googTypingNoiseDetection: true,
+          googNoiseReduction: true,
+          volume: 1.0,
+          }, 
           })
         .then(async (stream) => {
           addParticipantVideo(username,'local', stream);
           // localStream.current.srcObject = stream
+          localStream.current = stream
           setIsVisible(false)
           const videoTrack = stream.getVideoTracks()[0]
           const audioTrack = stream.getAudioTracks()[0]
@@ -267,6 +273,39 @@ function App() {
   });
 }
 
+socket.on("new-transport", user => {
+  console.log("new transport created for ", user)
+  
+  if(user!==username && !consumers.current[user]){
+    connectRecvTransport();
+    consumers.current[user] = true
+  }
+})
+
+  const handleMuteAudio = () =>{
+    const audioTrack = localStream.current?.getAudioTracks()[0];
+    if (!audioTrack) return;
+
+    const newMutedState = !isAudioMuted;
+    audioTrack.enabled = !newMutedState;
+    setIsAudioMuted(newMutedState);
+    setMicIcon(newMutedState ? "mute-24.png" : "mic-24.png");
+
+    console.log(`Audio ${newMutedState ? "muted" : "unmuted"}.`);
+  }
+
+  const handlePauseVideo = ()=>{
+    const videoTrack = localStream.current?.getVideoTracks()[0]
+    if(!videoTrack) return;
+
+    const newPausedState = !isVideoPaused
+    videoTrack.enabled = !newPausedState
+    setIsVideoPaused(newPausedState)
+    setCamIcon(newPausedState ? "no-video-24.png" : "video-24.png")
+
+    console.log(`Video ${newPausedState ? "video paused" : "video resumed"}`)
+  }
+
   async function handleHangup(){
     console.log('Exiting user from call:', username)
     socket.emit('hangup', username);
@@ -290,15 +329,6 @@ function App() {
     }
     
   }
-
-  socket.on("new-transport", user => {
-    console.log("new transport created for ", user)
-    
-    if(user!=username && !consumers.current[user]){
-      connectRecvTransport();
-      consumers.current[user] = true
-    }
-  })
 
   async function handleEndMeet() {
     socket.emit('end-meeting')
@@ -365,13 +395,24 @@ function App() {
               <div className="video-username">
               {video.user}
               </div>
+              {/* {isVideoPaused && (
+                <div className="p-5 bg-linear-to-br from-white to-gray-400 dark:from-gray-900 dark:to-gray-500 border-2 dark:border-gray-200 border-gray-400 relative">
+                  <img src="icon1.png" alt="default-user-icon" className="absolute inset-0  top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"/>
+                </div>
+              )} */}
           </div>
         ))}
         </div>
         {isVisible ? null : 
           <div className="flex items-center justify-center gap-2 md:gap-6 mt-2">
+          <button onClick={handleMuteAudio} className="bg-white-400 border border-gray-400 rounded-full dark:bg-white dark:border-gray-600">
+            <img src={micIcon} alt="Microphone" style={{ cursor: "pointer" }} className="p-3"></img>
+          </button>
           <button onClick={(e)=>{handleHangup()}} className="custom-button">Leave</button>
           <button onClick={(e)=>{handleEndMeet()}} className="custom-button">End Meeting</button>
+          <button onClick={handlePauseVideo} className="bg-white-400 border border-gray-400 rounded-full dark:bg-white dark:border-gray-600">
+            <img src={camIcon} alt="Video Icon" style={{cursor:"pointer"}} className="p-3"></img>
+          </button>
         </div>}
         
       </div>)
