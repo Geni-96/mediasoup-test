@@ -18,8 +18,11 @@ function App() {
   const [isVisible, setIsVisible] = useState(true)
   const [meetingEnded, setMeetingEnded] = useState(false)
   const curDevice = useRef(null)
-  const producerTransport = useRef(null)
+  const [producerTransport, setProducerTransport] = useState(null);
+  const producerCreated = useRef(false);
+  const consumers = useRef({});
   const consumerTransport = useRef(null)
+  const [sendTransportConnected, setSendTransportConnected] = useState(false);
   const [params, setParams] = useState({
     video: {
       track: null,
@@ -39,12 +42,15 @@ function App() {
     }
   })
 
-  // useEffect(() => {
-  //   if (params.track) { // Check if the track is available
-        
-  //   }
-  // }, [params.track]); // Run this effect when params.track changes
+  useEffect(() => {
+    if (producerTransport?.id && params.video.track) {
+      connectSendTransport();
+      // sendTransportConnected.current = true;
+      setSendTransportConnected(true)
+    }
+  }, [producerTransport, params.video.track]);
 
+  
   const addParticipantVideo = (user, id, stream) => {
     console.log(stream);
     setVideos((prevVideos) => [...prevVideos, { user, id, stream }]); // Store stream and ID
@@ -107,12 +113,13 @@ function App() {
             curDevice.current = device
             console.log('device created', device.rtpCapabilities)
             socket.emit("createWebRTCTransport", async(response)=>{
-              console.log('transports created', response.producer, response.consumer)
+              console.log("transports received from backend", response.producer, response.consumer)
+              const sendTransport = device.createSendTransport(response.producer);
+              consumerTransport.current = device.createRecvTransport(response.consumer)
               
-              producerTransport.current = await device.createSendTransport(response.producer)
-              consumerTransport.current = await device.createRecvTransport(response.consumer)
-
-              producerTransport.current.on('connect', async ({ dtlsParameters }, callback, errback) => {
+              console.log('transports created on frontend', producerTransport, consumerTransport.current)
+              
+              sendTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {
                 try {
                   // Signal local DTLS parameters to the server side transport
                   // see server's socket.on('transport-connect', ...)
@@ -127,8 +134,14 @@ function App() {
                   errback(error)
                 }
               })
+
+              // producerTransport.on('connectionstatechange', async (state) => {
+              //   if (state === 'connected') {
+              //     connectSendTransport();
+              //   }
+              // });
           
-              producerTransport.current.on('produce', async (parameters, callback, errback) => {
+              sendTransport.on('produce', async (parameters, callback, errback) => {
                 console.log(parameters)
           
                 try {
@@ -149,7 +162,7 @@ function App() {
                   errback(error)
                 }
               })
-
+              setProducerTransport(sendTransport);
               consumerTransport.current.on('connect', async ({ dtlsParameters }, callback, errback) => {
                 try {
                   // Signal local DTLS parameters to the server side transport
@@ -182,8 +195,9 @@ function App() {
     // this action will trigger the 'connect' and 'produce' events above
     try{
       console.log("connecting send transport and start producing", params)
-      const videoProducer = await producerTransport.current.produce(params.video)
-      const audioProducer = await producerTransport.current.produce(params.audio)
+      const videoProducer = await producerTransport.produce(params.video)
+      const audioProducer = await producerTransport.produce(params.audio)
+      producerCreated.current = true;
 
       videoProducer.on('trackended', () => {
         console.log('video track ended')
@@ -244,6 +258,7 @@ function App() {
         const video_id = Math.floor(Math.random() * 100);
         addParticipantVideo(user, video_id, stream); // You might rename this to `addParticipantMedia`
         console.log("added participant media for", user);
+        consumers.current[username] = true;
       }
 
     } catch (error) {
@@ -265,7 +280,7 @@ function App() {
     console.log('deleting tranports for:',username)
     try{
       
-      producerTransport.current.close()
+      producerTransport.close()
       consumerTransport.current.close()
       const localStream = videos.find(video => video.user === username)?.stream
       console.log(localStream, 'local video for me')
@@ -275,6 +290,15 @@ function App() {
     }
     
   }
+
+  socket.on("new-transport", user => {
+    console.log("new transport created for ", user)
+    
+    if(user!=username && !consumers.current[user]){
+      connectRecvTransport();
+      consumers.current[user] = true
+    }
+  })
 
   async function handleEndMeet() {
     socket.emit('end-meeting')
@@ -346,8 +370,6 @@ function App() {
         </div>
         {isVisible ? null : 
           <div className="flex items-center justify-center gap-2 md:gap-6 mt-2">
-          <button onClick={(e)=>{connectSendTransport()}} className="custom-button">Produce</button>
-          <button onClick={(e)=>{connectRecvTransport()}} className="custom-button">Consume</button>
           <button onClick={(e)=>{handleHangup()}} className="custom-button">Leave</button>
           <button onClick={(e)=>{handleEndMeet()}} className="custom-button">End Meeting</button>
         </div>}

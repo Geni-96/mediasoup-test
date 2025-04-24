@@ -67,6 +67,7 @@ io.on("connection", socket =>{
 
   console.log('new peer connected', socket.id)
   socket.on('joinRoom', async ({ username, roomId }, callback) => {
+    socket.io = io
     socket.join(roomId)
     let router;
     
@@ -76,7 +77,7 @@ io.on("connection", socket =>{
     if(!room){
       console.log('creating a new room with id:', roomId, `Adding user:${username}`)
       router = await getRouter(roomId);
-      console.log('router',router)
+      // console.log('router',router)
       if(router){
         const roomData = {
           peers: [username]
@@ -91,7 +92,7 @@ io.on("connection", socket =>{
       if (data){
         room = JSON.parse(data);
         router = await getRouter(roomId);
-        console.log('router', router)
+        // console.log('router', router)
         room.peers.push(username);
         socket.emit("newParticipant", room.peers)
         console.log("emiting event new participant and sending peers:", room.peers)
@@ -102,7 +103,7 @@ io.on("connection", socket =>{
     //send router rtpcapabilities to client
     if(router){
       const rtpCapabilities = await router.rtpCapabilities
-      console.log('rtp',rtpCapabilities)
+      // console.log('rtp',rtpCapabilities)
       callback({rtpCapabilities})
     }
     //once we have the router, we create produce and consume transports for each
@@ -134,6 +135,11 @@ io.on("connection", socket =>{
         dtlsParameters: consumerTransport.dtlsParameters
       }
       callback({producer:producerOptions,consumer:consumerOptions})
+      // console.log('transports created')
+      // router.observer.on("newtransport", ()=>{
+      //   console.log("new transport created") //not working when the first user transports are created
+      //   io.in(roomId).emit("new-transport", username)
+      // })
     })
     // see client's socket.emit('transport-connect', ...)
   socket.on('transport-connect', async ({ dtlsParameters }) => {
@@ -152,6 +158,7 @@ io.on("connection", socket =>{
     })
     producerInfo.get(`${roomId}:${username}`).set(`${kind}:producer`, producer)
     // console.log('producer from map', producerInfo)
+    io.to(roomId).emit("new-transport", username)
     producer.on('transportclose', () => {
       console.log('transport for this producer closed ')
       producer.close()
@@ -277,7 +284,6 @@ io.on("connection", socket =>{
     } else {
       console.log(`Room ${roomId} or ${uname} not found in Redis`);
     }
-
   })
 
   socket.on("end-meeting",async()=>{
@@ -295,7 +301,6 @@ io.on("connection", socket =>{
       console.log(result, 'result of deleting room data from redis')
       //close router
       router.close()
-      router = null;
     }
   })
   })
