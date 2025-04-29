@@ -2,10 +2,7 @@ import { React, useState, useRef, useEffect } from 'react';
 import { io } from "socket.io-client";
 import { Device } from "mediasoup-client";
 
-const socket = io("http://localhost:5001", {
-  transports: ["websocket", "polling"],
-  withCredentials: true
-});
+const socket = io();
 
 socket.on("connect_error", (error) => {
   console.error("WebSocket Connection Error:", error);

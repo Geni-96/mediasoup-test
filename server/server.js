@@ -3,6 +3,7 @@ const express = require('express');
 const http = require('http');
 // const { mediasoup } = require('mediasoup');
 const cors = require('cors')
+const path = require('path')
 require('dotenv').config();
 const redis = require('redis');
 const { createWorker, getRouter } = require('./mediasoup-config');
@@ -11,31 +12,28 @@ const { createWorker, getRouter } = require('./mediasoup-config');
 })();
 const app = express();
 const server = http.createServer(app);
-const io = require("socket.io")(server, {
-  cors: {
-    origin: "http://localhost:3000",
-    methods: ["GET", "POST"],
-    credentials: true
-  }
-});
+const io = require("socket.io")(server);
+
+//serve frontend build
+app.use(express.static(path.join(__dirname, '../client/build')));
 
 // cors setup
-app.use(cors({ 
-    origin: "http://localhost:3000", // Allow React frontend
-    credentials: true  // Allow cookies & authentication headers
-}));
+// app.use(cors({ 
+//     origin: "http://localhost:3000", // Allow React frontend
+//     credentials: true  // Allow cookies & authentication headers
+// }));
 
-app.use((req, res, next) => {
-    res.setHeader("Access-Control-Allow-Origin", "http://localhost:3000");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-    res.setHeader("Access-Control-Allow-Credentials", "true");
+// app.use((req, res, next) => {
+//     res.setHeader("Access-Control-Allow-Origin", "http://localhost:3000");
+//     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+//     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+//     res.setHeader("Access-Control-Allow-Credentials", "true");
 
-    if (req.method === "OPTIONS") {
-        return res.sendStatus(200);
-    }
-    next();
-});
+//     if (req.method === "OPTIONS") {
+//         return res.sendStatus(200);
+//     }
+//     next();
+// });
 
 const client = redis.createClient({
   username: 'default',
@@ -357,6 +355,10 @@ const delPeerTransports = async(roomId, uname) =>{
   }
 }
 
-server.listen(5001, ()=>{
-  console.log('Server runnning on port 5001')
-})
+function startServer() {
+  app.listen(5001, () => {
+    console.log('Server is running on http://localhost:5001');
+  });
+}
+  
+module.exports = { startServer };
