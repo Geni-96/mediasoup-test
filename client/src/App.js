@@ -2,7 +2,7 @@ import { React, useState, useRef, useEffect } from 'react';
 import { io } from "socket.io-client";
 import { Device } from "mediasoup-client";
 
-const socket = io("http://localhost:5001", {
+const socket = io("https://miewebconfbackend.idcxyz.shop", {
   transports: ["websocket", "polling"],
   withCredentials: true
 });
@@ -14,7 +14,7 @@ socket.on("connect_error", (error) => {
 function App() {
   const [username, setUsername] = useState('')
   const [roomId, setRoomId] = useState('')
-  const [videos, setVideos] = useState([]);
+  const [videos, setVideos] = useState([])
   const [isVisible, setIsVisible] = useState(true)
   const [meetingEnded, setMeetingEnded] = useState(false)
   const curDevice = useRef(null)
@@ -22,7 +22,6 @@ function App() {
   const producerCreated = useRef(false);
   const consumers = useRef({});
   const consumerTransport = useRef(null)
-  const [sendTransportConnected, setSendTransportConnected] = useState(false);
   const localStream = useRef(null)
   const [isAudioMuted, setIsAudioMuted] = useState(null)
   const [isVideoPaused, setIsVideoPaused] = useState(null)
@@ -50,8 +49,6 @@ function App() {
   useEffect(() => {
     if (producerTransport?.id && params.video.track) {
       connectSendTransport();
-      // sendTransportConnected.current = true;
-      setSendTransportConnected(true)
     }
   }, [producerTransport, params.video.track]);
 

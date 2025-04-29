@@ -13,7 +13,7 @@ const app = express();
 const server = http.createServer(app);
 const io = require("socket.io")(server, {
   cors: {
-    origin: "http://localhost:3000",
+    origin: "https://miewebconfapp.idcxyz.shop",
     methods: ["GET", "POST"],
     credentials: true
   }
@@ -21,12 +21,12 @@ const io = require("socket.io")(server, {
 
 // cors setup
 app.use(cors({ 
-    origin: "http://localhost:3000", // Allow React frontend
+    origin: "https://miewebconfapp.idcxyz.shop", // Allow React frontend
     credentials: true  // Allow cookies & authentication headers
 }));
 
 app.use((req, res, next) => {
-    res.setHeader("Access-Control-Allow-Origin", "http://localhost:3000");
+    res.setHeader("Access-Control-Allow-Origin", "https://miewebconfapp.idcxyz.shop");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
     res.setHeader("Access-Control-Allow-Credentials", "true");
@@ -309,7 +309,7 @@ io.on("connection", socket =>{
 
 const createWebRtcTransport = async (router) => {
   const transport = await router.createWebRtcTransport({
-      listenIps: [{ ip: '127.0.0.1', announcedIp: '127.0.0.1' }],
+      listenIps: [{ ip: '0.0.0.0', announcedIp: 'miewebconfbackend.idcxyz.shop' }],
       enableUdp: true,
       enableTcp: true,
       preferUdp: true,

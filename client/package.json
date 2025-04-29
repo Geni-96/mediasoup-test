@@ -47,6 +47,7 @@
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.1.4",
+    "serve": "^14.2.4",
     "tailwindcss": "^4.1.4"
   }
 }
