@@ -1,13 +1,14 @@
 {
   "name": "mie-webconf-app",
   "description": "This is a mediasoup based web conferencing app with socket.io for signalling",
-  "version": "1.0.0",
+  "version": "1.0.5",
   "main": "server/server.js",
   "bin":{
     "mie-webconf-app": "server/server.js"
   },
   "files": [
-  "server/",
+  "server/server.js",
+  "server/mediasoup-config.js",
   "client/build/"
 ],
   "scripts": {
@@ -22,6 +23,14 @@
   "license": "ISC",
   "bugs": {
     "url": "https://github.com/Geni-96/mediasoup-test/issues"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "mediasoup": "^3.15.7",
+    "redis": "^4.7.0",
+    "socket.io": "^4.8.1",
+    "dotenv": "^16.5.0"
   }
 }
 

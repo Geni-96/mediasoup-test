@@ -2,6 +2,7 @@
 const express = require('express');
 const http = require('http');
 // const { mediasoup } = require('mediasoup');
+const { Server } = require('socket.io');
 const cors = require('cors')
 const path = require('path')
 require('dotenv').config();
@@ -12,11 +13,10 @@ const { createWorker, getRouter } = require('./mediasoup-config');
 })();
 const app = express();
 const server = http.createServer(app);
-const io = require("socket.io")(server);
+const io = new Server(server);
 
 //serve frontend build
 app.use(express.static(path.join(__dirname, '../client/build')));
-
 // cors setup
 // app.use(cors({ 
 //     origin: "http://localhost:3000", // Allow React frontend
@@ -34,7 +34,19 @@ app.use(express.static(path.join(__dirname, '../client/build')));
 //     }
 //     next();
 // });
+function validateEnv() {
+  const requiredVars = ['REDIS_HOST', 'REDIS_PORT', 'REDIS_PASSWORD'];
+  const missing = requiredVars.filter((key) => !process.env[key]);
 
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required environment variables: ${missing.join(', ')}`
+    );
+  }
+}
+
+// Call before using Redis
+validateEnv();
 const client = redis.createClient({
   username: 'default',
   password: process.env.REDIS_PASSWORD,
@@ -356,9 +368,10 @@ const delPeerTransports = async(roomId, uname) =>{
 }
 
 function startServer() {
-  app.listen(5001, () => {
+  server.listen(5001, () => {
     console.log('Server is running on http://localhost:5001');
   });
 }
+
   
 module.exports = { startServer };

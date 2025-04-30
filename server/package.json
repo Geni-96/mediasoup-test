@@ -14,12 +14,7 @@
     "express": "^4.21.2",
     "mediasoup": "^3.15.7",
     "redis": "^4.7.0",
-    "socket.io": "^4.8.1"
-  },
-  "devDependencies": {
-    "dotenv": "^16.5.0",
-    "jest": "^29.7.0",
-    "socket.io-client": "^4.8.1",
-    "supertest": "^7.1.0"
+    "socket.io": "^4.8.1",
+    "dotenv": "^16.5.0"
   }
 }

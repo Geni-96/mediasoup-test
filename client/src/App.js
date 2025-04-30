@@ -7,6 +7,9 @@ const socket = io();
 socket.on("connect_error", (error) => {
   console.error("WebSocket Connection Error:", error);
 })
+socket.on('connect', () => {
+  console.log('Connected to server');
+});
 
 function App() {
   const [username, setUsername] = useState('')

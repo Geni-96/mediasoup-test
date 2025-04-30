@@ -1,5 +1,5 @@
 
-## 🎥 Mediasoup Video Conferencing App
+## 🎥 Mediasoup based Video Conferencing App
 
 A full-stack WebRTC-based video conferencing application built using React, Socket.IO, Express, Mediasoup, and Redis.
 
@@ -20,19 +20,23 @@ Backend	    -   Express, Socket.IO
 Media Layer -	Mediasoup  
 Data Store	-   Redis (for room/call management)  
 
-### 🧑‍💻 Usage
+### 🔧 Required Environment Variables
 
-1. Start the backend   
-cd server   
-npm install   
-npm run start   
-2. Start the frontend   
-cd client   
-npm install   
-npm run start   
-By default, the frontend runs on http://localhost:3000 and the backend on http://localhost:5001.  
-Make sure to run Redis locally or use a cloud Redis provider.  
-All usernames within a room must be unique.  
+Your app requires the following environment variables to connect to Redis:
+
+- `REDIS_HOST` – the hostname of your Redis server
+- `REDIS_PORT` – the port (usually 6379)
+- `REDIS_PASSWORD` – the password for authentication.  
+
+You can define these in your environment or in a `.env` file.  
+Make sure to run Redis locally or use a cloud Redis provider.    
+All usernames within a room must be unique.    
+
+### 🧑‍💻 Usage
+ 
+npm start   
+By default, the app runs on http://localhost:5001.  
+
 
 ### 📡 How It Works
 
@@ -44,8 +48,5 @@ All usernames within a room must be unique.
 
 ### 🧪 Features in Progress / TODO
 
-- Extending functionality for audio tracks as well.
-- Adding hangup functionality
-- Making produce/consume automatic.
 - Add additional workers and implement round robin.
-- UI Changes
+- UI Changes for preserving the state.
