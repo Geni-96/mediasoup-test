@@ -18,6 +18,7 @@ A full-stack WebRTC-based video conferencing application built using React, Sock
 - Enter a unique username for each call session
 - Mute/unmute audio and video during calls
 - Leave the call anytime
+- Clean up of resources when a person leaves the call or ends the meeting
 
 ### 🛠️ Tech Stack
 
@@ -50,8 +51,5 @@ All usernames within a room must be unique.
 
 ### 🧪 Features in Progress / TODO
 
-- Extending functionality for audio tracks as well.
-- Adding hangup functionality
-- Making produce/consume automatic.
 - Add additional workers and implement round robin.
 - UI Changes
