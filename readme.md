@@ -3,6 +3,10 @@
 
 [short demo](https://youtube.com/shorts/fFixahtMb28?feature=shared)
 
+[Demo website where you can try the app](https://www.miewebconf.idcxyz.shop/)
+
+[npm package](https://www.npmjs.com/package/mie-webconf-app)
+
 A full-stack WebRTC-based video conferencing application built using React, Socket.IO, Express, Mediasoup, and Redis.
 
 ### 🚀 Features
