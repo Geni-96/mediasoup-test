@@ -8,15 +8,16 @@ on:
 jobs:
     build:
         runs-on: ubuntu-latest
+        env:
+            REDIS_HOST: ${{ secrets.REDIS_HOST }}
+            REDIS_PORT: ${{ secrets.REDIS_PORT }}
+            REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
         steps:
             - uses: actions/checkout@v4
             - uses: actions/setup-node@v4
               with:
                 node-version: 22
             - run: npm ci
-              env:
-                REDIS_HOST: ${{ secrets.REDIS_HOST }}
-                REDIS_PORT: ${{ secrets.REDIS_PORT }}
-                REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+              
 
             - run: npm test
