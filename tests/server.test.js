@@ -1,34 +1,32 @@
 const request = require('supertest')
 const server = require('../server/server')
 const ioc = require("socket.io-client");
-
-
-beforeAll(async()=>{
-    await server.startServer()
-})
 let clientSocket;
+beforeAll(()=>{
+    server.startServer()
+})
 describe('check socket connection of server', () =>{
-    it('should connect to client socket',async()=>{
-        clientSocket = ioc()
-
-        server.io.on("connection", (socket) => {
-            serverSocket = socket;
-          });
-        clientSocket.on("connect", ()=>{
-            done();
-        });
-    })
-})
-
-describe('check redis connection', ()=>{
+    
+    
     it('should set key', async()=>{
-        expect(server.client.set('foo','bar')).toBeTruthy();
+        await expect(server.client.set('foo','bar')).resolves.toBeTruthy();
         await expect(server.client.get('foo')).resolves.toBe('bar')
-        expect(server.client.del('foo')).toBeTruthy()
+        await expect(server.client.del('foo')).resolves.toBe(1)
+
     })
+    it('should connect to client socket', (done) => {
+        clientSocket = ioc("http://localhost:5001"); // ensure correct port
+      
+        clientSocket.on("connect",done)
+      });
+    
 })
-afterAll(async () => {
-    server.io.close();
+
+
+afterAll(() => {
     clientSocket.disconnect();
-    await server.stopServer();
+    server.stopServer()
+    setTimeout(()=>{
+        process.exit(0)
+    }, 3000)
 });

@@ -5,7 +5,7 @@ const http = require('http');
 const cors = require('cors')
 require('dotenv').config();
 const redis = require('redis');
-const { createWorker, getRouter } = require('./mediasoup-config');
+const { createWorker, getRouter, worker } = require('./mediasoup-config');
 (async () => {
   await createWorker();
 })();
@@ -311,7 +311,6 @@ io.on("connection", socket =>{
     }
   })
   })
-
 })
 
 const createWebRtcTransport = async (router) => {
@@ -372,9 +371,39 @@ function startServer(){
 }
 
 async function stopServer() {
-  if (client) await client.quit();
-  if (server) await server.close();
+  try{
+    for (let [id, socket] of io.sockets.sockets) {
+      socket.disconnect(true);
+    }
+  }catch(e){
+    console.error('error closing sockets',e)
+  }
+  try {
+    await new Promise((resolve) => io.close(() => {
+      resolve();
+    }));
+  } catch (e) {
+    console.error("[stopServer] Error closing Socket.IO:", e);
+  }
+
+  try {
+    if (client.isOpen) {
+      await client.quit();
+    }
+  } catch (e) {
+    console.error("[stopServer] Error closing Redis client:", e);
+  }
+  try{
+    await server.close()
+  }catch(e){
+    console.error('server closing err:',e)
+  }
+  if(worker){
+    await worker.close()
+  }
 }
+
+
 
 
   module.exports = ({startServer, stopServer, io, client});
