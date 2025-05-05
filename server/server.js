@@ -15,7 +15,8 @@ const server = http.createServer(app);
 const io = require("socket.io")(server);
 
 const path = require('path')
-// app.use(express.static(path.join(__dirname, '../client/build')))
+app.use(express.static(path.join(__dirname, '../client/build')))
+
 // const io = require("socket.io")(server, {
 //   cors: {
 //     origin: "http://localhost:3000",
@@ -57,7 +58,7 @@ client.on('error', err => console.log('Redis Client Error', err));
 
 async function connectRedis() {
   await client.connect();
-  // console.log('Connected to Redis');
+  console.log('Connected to Redis');
 }
 
 // startServer()
@@ -259,6 +260,7 @@ io.on("connection", socket =>{
     console.log('consumer resume')
     consumerInfo.get(`${roomId}:${username}`).get('consumers').get(user).resume()
   })
+
   socket.on('hangup', async(uname) =>{
     console.log("on one peer left")
     socket.to(roomId).emit('remove video', uname)
@@ -305,7 +307,9 @@ io.on("connection", socket =>{
         delPeerTransports(roomId, peer)
       }
       const result = await client.del(`room:${roomId}`);
-      console.log(result, 'result of deleting room data from redis')
+      // if(result){
+      //   stopServer()
+      // }
       //close router
       router.close()
     }
@@ -365,11 +369,12 @@ const delPeerTransports = async(roomId, uname) =>{
 
 function startServer(){  
   server.listen(5001,()=>{
-    // console.log('started server on port 5001')
+    console.log('started server on port 5001')
   })
   connectRedis();
 }
 
+startServer()
 async function stopServer() {
   try{
     for (let [id, socket] of io.sockets.sockets) {
@@ -403,7 +408,4 @@ async function stopServer() {
   }
 }
 
-
-
-
-  module.exports = ({startServer, stopServer, io, client});
+module.exports = ({startServer, stopServer, io, client});
