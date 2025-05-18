@@ -2,14 +2,11 @@ import { React, useState, useRef, useEffect } from 'react';
 import { io } from "socket.io-client";
 import { Device } from "mediasoup-client";
 
-const socket = io();
 
+const socket = io();
 socket.on("connect_error", (error) => {
   console.error("WebSocket Connection Error:", error);
 })
-socket.on('connect', () => {
-  console.log('Connected to server');
-});
 
 function App() {
   const [username, setUsername] = useState('')
@@ -47,6 +44,17 @@ function App() {
     }
   })
 
+  let gridColsClass = "";
+
+  if (videos.length === 1) {
+    gridColsClass = "grid-1";  // Use custom class
+  } else if (videos.length >= 2 && videos.length <= 4) {
+    gridColsClass = "grid-2";  // Use custom class
+  } else if (videos.length > 4) {
+    gridColsClass = "grid-3";  // Use custom class
+  }
+
+
   useEffect(() => {
     if (producerTransport?.id && params.video.track) {
       connectSendTransport();
@@ -54,7 +62,12 @@ function App() {
       setSendTransportConnected(true)
     }
   }, [producerTransport, params.video.track]);
+  useEffect(()=>{
+    window.addEventListener('beforeunload', () => {
+      document.getElementById('leave-button').click();
+    });
 
+  },[])
   
   const addParticipantVideo = (user, id, stream) => {
     console.log(stream);
@@ -226,6 +239,9 @@ function App() {
   }
 
   async function connectRecvTransport() {
+    // this creates consumers on the backend and consumes videos from mediasoup.
+    // we receive the video parameters and tracks on the frontend for which we create mediastream objects and add to the UI.
+
     console.log("connecting recv transport and start consuming");
   
     await socket.emit('consume', {
@@ -305,14 +321,14 @@ socket.on("new-transport", user => {
 
     console.log(`Video ${newPausedState ? "video paused" : "video resumed"}`)
   }
-
+  
   async function handleHangup(){
     console.log('Exiting user from call:', username)
     socket.emit('hangup', username);
     delPeerTransports()
     setMeetingEnded(true)
     setVideos([])
-    console.log('emitng hangup username', username)
+    console.log('emiting hangup username', username)
   }
 
   async function delPeerTransports(){
@@ -344,17 +360,20 @@ socket.on("new-transport", user => {
     delPeerTransports()
   })
 
+  
+  
+
   return (
-    <div className="flex items-center justify-center">
+    <div className="flex items-center justify-center w-full">
       {meetingEnded ? 
         <div className="w-full h-screen bg-linear-to-br from-gray-300 to-gray-600">
         <h1 className="text-3xl md:text-5xl lg:7xl font-semibold absolute -translate-x-1/2 -translate-y-1/2 top-2/4 left-1/2">Thank you</h1>
         </div>
         : 
-        (<div className="container my-10">
+        (<div className="container my-10 mx-auto w-full p-2">
           {isVisible ? (
-            <form id="join-screen" onSubmit={handleSubmit} className="max-w-9/10 md:max-w-sm mx-auto my-4 p-4 border-2 dark:border-gray-200 border-gray-600">
-              <h2 className="dark:text-white text-2xl font-semibold ml-[30%] my-4">Join Room</h2>
+            <form id="join-screen" onSubmit={handleSubmit} className="mx-auto my-4 p-4 border-2 dark:border-gray-200 border-gray-600  md:w-1/2">
+              <h2 className="dark:text-white text-2xl font-semibold ml-[35%] my-4">Join Room</h2>
               <label className="dark:text-white my-8">
                 Display name:
                 <input
@@ -379,10 +398,10 @@ socket.on("new-transport", user => {
             </form>
           ) : null}
 
-          <div className={`grid gap-2 my-4 mx-10 place-items-center ${videos.length === 1 ? "grid-cols-1" : ""} ${videos.length === 2 ? "grid-cols-2" : ""} ${videos.length > 2 ? "grid-cols-3" : ""}`}>
+          <div className={`gap-2 my-4 mx-10 place-items-center ${gridColsClass}`}>
             {videos.map((video) => (
               <div key={video.id} className="video-frame">
-                <video
+                <video className="object-cover"
                     ref={(videoElement) => {
                         if (videoElement) {
                             videoElement.srcObject = video.stream;
@@ -403,17 +422,19 @@ socket.on("new-transport", user => {
           </div>
         ))}
         </div>
+        <div className="hidden dark:bg-white dark:border-gray-600"></div>
         {isVisible ? null : 
-          <div className="flex items-center justify-center gap-2 md:gap-6 mt-2">
+          <div className="fixed bottom-1 left-0 right-0 z-50 flex items-center justify-center gap-2 md:gap-6 mt-2 w-full">
           <button onClick={handleMuteAudio} className="bg-white-400 border border-gray-400 rounded-full dark:bg-white dark:border-gray-600">
             <img src={micIcon} alt="Microphone" style={{ cursor: "pointer" }} className="p-3"></img>
           </button>
-          <button onClick={(e)=>{handleHangup()}} className="custom-button">Leave</button>
+          <button onClick={(e)=>{handleHangup()}} id="leave-button" className="custom-button">Leave</button>
           <button onClick={(e)=>{handleEndMeet()}} className="custom-button">End Meeting</button>
           <button onClick={handlePauseVideo} className="bg-white-400 border border-gray-400 rounded-full dark:bg-white dark:border-gray-600">
             <img src={camIcon} alt="Video Icon" style={{cursor:"pointer"}} className="p-3"></img>
           </button>
-        </div>}
+        </div>
+        }
         
       </div>)
       }

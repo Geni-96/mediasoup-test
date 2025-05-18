@@ -14,6 +14,7 @@ const { createWorker, getRouter } = require('./mediasoup-config');
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
+let client;
 
 //serve frontend build
 app.use(express.static(path.join(__dirname, '../client/build')));
@@ -39,33 +40,32 @@ function validateEnv() {
   const missing = requiredVars.filter((key) => !process.env[key]);
 
   if (missing.length > 0) {
-    throw new Error(
-      `Missing required environment variables: ${missing.join(', ')}`
-    );
+    console.log(`Missing required environment variables: ${missing.join(', ')}`)
+    console.log('using device storage instead')
+    return false
   }
+  return true
 }
 
 // Call before using Redis
-validateEnv();
-const client = redis.createClient({
-  username: 'default',
-  password: process.env.REDIS_PASSWORD,
-  socket: {
-      host: process.env.REDIS_HOST,
-      port: process.env.REDIS_PORT
-  }
-});
+if (validateEnv()){
+  client = redis.createClient({
+    username: 'default',
+    password: process.env.REDIS_PASSWORD,
+    socket: {
+        host: process.env.REDIS_HOST,
+        port: process.env.REDIS_PORT
+    }
+  });
+  (async () => {
+    await client.connect();
+    console.log('Connected to Redis');
+  })();
+  client.on('error', err => console.log('Redis Client Error', err));
+}
 
 
-client.on('error', err => console.log('Redis Client Error', err));
-
-
-(async () => {
-  await client.connect();
-  console.log('Connected to Redis');
-})();
-
-// const rooms = new Map()
+const rooms = new Map()
 // const peers = io.of('/mediasoup')
 let producer
 let consumer
@@ -83,30 +83,53 @@ io.on("connection", socket =>{
     
     producerInfo.set(`${roomId}:${username}`, new Map());
     consumerInfo.set(`${roomId}:${username}`, new Map());
-    room = await client.exists(`room:${roomId}`);
-    if(!room){
-      console.log('creating a new room with id:', roomId, `Adding user:${username}`)
-      router = await getRouter(roomId);
-      // console.log('router',router)
-      if(router){
-        const roomData = {
-          peers: [username]
-        };
-        await client.set(`room:${roomId}`, JSON.stringify(roomData));
-      }
-    }
-    else{
-      console.log(`Adding ${username} to existing room ${roomId}`)
-      const data = await client.get(`room:${roomId}`);
-      console.log(data, 'exiting room data')
-      if (data){
-        room = JSON.parse(data);
+    if (client){
+      room = await client.exists(`room:${roomId}`);
+      if(!room){
+        console.log('creating a new room with id:', roomId, `Adding user:${username}`)
         router = await getRouter(roomId);
-        // console.log('router', router)
-        room.peers.push(username);
-        socket.emit("newParticipant", room.peers)
-        console.log("emiting event new participant and sending peers:", room.peers)
-        await client.set(`room:${roomId}`, JSON.stringify(room));
+        // console.log('router',router)
+        if(router){
+          const roomData = {
+            peers: [username]
+          };
+          await client.set(`room:${roomId}`, JSON.stringify(roomData));
+        }
+      }
+      else{
+        console.log(`Adding ${username} to existing room ${roomId}`)
+        const data = await client.get(`room:${roomId}`);
+        console.log(data, 'exiting room data')
+        if (data){
+          room = JSON.parse(data);
+          router = await getRouter(roomId);
+          // console.log('router', router)
+          room.peers.push(username);
+          socket.emit("newParticipant", room.peers)
+          console.log("emiting event new participant and sending peers:", room.peers)
+          await client.set(`room:${roomId}`, JSON.stringify(room));
+        }
+      }
+    }else{
+      room = rooms.get(roomId)
+      if(!room){
+        console.log('creating a new room with id:', roomId, `Adding user:${username}`)
+        router = await getRouter();
+        rooms.set(roomId, { router, peers: [] });
+        room = rooms.get(roomId)
+        if(rooms.has(roomId)){
+          room.peers.push(username)
+        }
+      }
+      else{
+        console.log(`Adding ${username} to existing room ${roomId}`)
+        router = room.router
+        if(rooms.has(roomId)){
+          room = rooms.get(roomId)
+          room.peers.push(username)
+          socket.emit("newParticipant", room.peers)
+          console.log("emiting event new participant and sending peers:", room.peers)
+        }
       }
     }
     
@@ -192,8 +215,10 @@ io.on("connection", socket =>{
     const paramsList = []
     try {
       // check if the router can consume the specified producer
-      let roomData = await client.get(`room:${roomId}`);
-      room = JSON.parse(roomData)
+      if(client){
+        let roomData = await client.get(`room:${roomId}`);
+        room = JSON.parse(roomData)
+      }
       const cur_peers = room.peers
       console.log("current peers in the room", cur_peers, "cur username", username)
       const consumers = consumerInfo.get(`${roomId}:${username}`).get('consumers')
@@ -267,51 +292,78 @@ io.on("connection", socket =>{
     socket.to(roomId).emit('remove video', uname)
     delPeerTransports(roomId, uname)
 
-    //remove peer from redis
-    const roomKey = `room:${roomId}`
-    const data = await client.get(roomKey);
+    if(client){
+      //remove peer from redis
+      const roomKey = `room:${roomId}`
+      const data = await client.get(roomKey);
 
-    if (data) {
-      const roomData = JSON.parse(data);
-      
-      // Remove the peer from the array
-      roomData.peers = roomData.peers.filter(peer => peer !== uname);
-      console.log('filetered peers', roomData.peers)
-      if(roomData.peers.length===1){
-        // io.to(roomId).emit("end-meeting")
-        io.to(roomId).emit("remove video", roomData.peers[0])
+      if (data) {
+        const roomData = JSON.parse(data);
+        
+        // Remove the peer from the array
+        roomData.peers = roomData.peers.filter(peer => peer !== uname);
+        console.log('filetered peers', roomData.peers)
+        if(roomData.peers.length===1){
+          // io.to(roomId).emit("end-meeting")
+          io.to(roomId).emit("remove video", roomData.peers[0])
+          delPeerTransports(roomId,username)
+          const result = await client.del(`room:${roomId}`);
+          console.log(result, 'result of deleting room data from redis')
+          //close router
+          router.close()
+          return
+        }
+        // Update the Redis entry
+        await client.set(roomKey, JSON.stringify(roomData));
+
+        console.log(`Removed ${uname} from room ${roomId}`);
+      } else {
+        console.log(`Room ${roomId} or ${uname} not found in Redis`);
+      }
+    } else{
+      room.peers = room.peers.filter(peer => peer !== uname);
+
+      // Optionally remove the room if it's empty
+      if (room.peers.length ===  1) {
+        io.to(roomId).emit("remove video", room.peers[0])
         delPeerTransports(roomId,username)
-        const result = await client.del(`room:${roomId}`);
-        console.log(result, 'result of deleting room data from redis')
-        //close router
+        rooms.delete(roomId);
         router.close()
         return
+      } else {
+        rooms.set(roomId, room); // update Map (technically not needed unless replacing the object)
       }
-      // Update the Redis entry
-      await client.set(roomKey, JSON.stringify(roomData));
-
-      console.log(`Removed ${uname} from room ${roomId}`);
-    } else {
-      console.log(`Room ${roomId} or ${uname} not found in Redis`);
     }
+    
   })
 
   socket.on("end-meeting",async()=>{
     io.to(roomId).emit("remove-all-videos")
     console.log('ending the meeting in ', roomId)
-    const data = await client.get(`room:${roomId}`);
-    if(data){
-      const {peers} = JSON.parse(data)
+    let peers;
+    if(client){
+      const data = await client.get(`room:${roomId}`);
+      if(data){
+        const {peers} = JSON.parse(data)
+        peers = peers
+      }
+    }
+    else{
+      peers = room.peers
+    }
       // console.log(peers)
       for(const peer of peers){
         console.log('About to delete peer transports for:', roomId, peer, 'inside end meet for loop')
         delPeerTransports(roomId, peer)
       }
-      const result = await client.del(`room:${roomId}`);
-      console.log(result, 'result of deleting room data from redis')
+      if(client){
+        const result = await client.del(`room:${roomId}`);
+        console.log(result, 'result of deleting room data from redis')
+      }else{
+        rooms.delete(roomId)
+      }
       //close router
       router.close()
-    }
   })
   })
 
@@ -372,6 +424,5 @@ function startServer() {
     console.log('Server is running on http://localhost:5001');
   });
 }
-
   
 module.exports = { startServer };
