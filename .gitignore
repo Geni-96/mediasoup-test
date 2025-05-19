@@ -6,6 +6,7 @@ client/.DS_Store
 client/node_modules
 server/node_modules
 .env
+tests
 server/package-lock.json
 client/build
 client/package-lock.json

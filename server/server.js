@@ -73,7 +73,7 @@ let consumerInfo = new Map();
 io.on("connection", socket =>{
 
   // console.log('new peer connected', socket.id)
-  socket.on('joinRoom', async ({ username, roomId }, callback) => {
+  socket.on('joinRoom', async ({ username, roomId,create }, callback) => {
     socket.io = io
     socket.join(roomId)
     let router;
@@ -81,7 +81,10 @@ io.on("connection", socket =>{
     producerInfo.set(`${roomId}:${username}`, new Map());
     consumerInfo.set(`${roomId}:${username}`, new Map());
     room = await client.exists(`room:${roomId}`);
-    if(!room){
+    if(create){
+      if(room){
+        return callback({error: 'Please try again, room already exists'})
+      }
       console.log('creating a new room with id:', roomId, `Adding user:${username}`)
       router = await getRouter(roomId);
       // console.log('router',router)
@@ -93,6 +96,9 @@ io.on("connection", socket =>{
       }
     }
     else{
+      if(!room){
+        return callback({error: 'Room not found'})
+      }
       console.log(`Adding ${username} to existing room ${roomId}`)
       const data = await client.get(`room:${roomId}`);
       console.log(data, 'exiting room data')
