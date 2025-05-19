@@ -25,6 +25,7 @@ function App() {
   const [isVideoPaused, setIsVideoPaused] = useState(null)
   const [micIcon, setMicIcon] = useState("mic-24.png")
   const [camIcon, setCamIcon] = useState("video-24.png")
+  const [showLink, setShowLink] = useState(false)
   const [params, setParams] = useState({
     video: {
       track: null,
@@ -66,13 +67,25 @@ function App() {
     }
   };
 
-  const handleSubmit = async(e) =>{
+  const handleSubmit = async(e,create, room) =>{
     e.preventDefault()
+    setIsVisible(false)
     let device;
     let rtpCapabilities;
 
+    if(!username) {
+      alert("Please enter your username to be displayed in the meeting");
+      return;
+    }
+    if(room){
+      setRoomId(room)
+    }
+    if(create){
+      setShowLink(true)
+    }
+
     try{
-      if(username && roomId){
+      if(username && (roomId || room)){
         navigator.mediaDevices.getUserMedia({ 
           audio: false, 
           video: true, 
@@ -109,7 +122,8 @@ function App() {
           }));
         })
         device = new Device()
-        socket.emit("joinRoom", {username, roomId}, async(response) =>{
+        const param = roomId || room
+        socket.emit("joinRoom", {username, param, create}, async(response) =>{
           if(response.rtpCapabilities){
             rtpCapabilities = response.rtpCapabilities
             await device.load({routerRtpCapabilities: rtpCapabilities})
@@ -341,8 +355,52 @@ socket.on("new-transport", user => {
     delPeerTransports()
   })
 
+  const createMeet = (e) => {
+    e.preventDefault();
+    const room = Math.random().toString(36).substring(2, 15)
+    setShowLink(true)
+    handleSubmit(e, true, room)
+  }
+  const joinMeet = (e) => {
+    e.preventDefault();
+    let paramId;
+    if(!roomId){
+      paramId = new URLSearchParams(window.location.search).get('roomId');
+      if(!paramId){
+        alert("Please enter a room ID")
+        return
+      }
+    handleSubmit(e, false, paramId)
+  }
+}
+
+const copyLink = async(e) => {
+    try{
+        e.preventDefault();
+        const defaultMessage = document.getElementById("default-message");
+        const successMessage = document.getElementById("success-message");
+        const windowObject = window.location.href
+        await navigator.clipboard.writeText(`${windowObject}?roomId=${roomId}`);
+        // show the success message
+        defaultMessage.classList.add("hidden");
+        successMessage.classList.remove("hidden");
+
+        // Optionally, reset the success message after a few seconds (for example, 2 seconds)
+        setTimeout(function() {
+            defaultMessage.classList.remove("hidden");
+            successMessage.classList.add("hidden");
+            setShowLink(false)
+        }, 2000);
+        
+    }catch(err){
+        console.log('an error occured',err)
+        alert(`Failed to copy meeting link. You can still join using this ID:${roomId}`)
+    }
+}
+
+
   return (
-    <div className="flex items-center justify-center">
+    <div className="w-full flex items-center justify-center">
       {meetingEnded ? 
         <div className="w-full h-screen bg-linear-to-br from-gray-300 to-gray-600">
         <h1 className="text-3xl md:text-5xl lg:7xl font-semibold absolute -translate-x-1/2 -translate-y-1/2 top-2/4 left-1/2">Thank you</h1>
@@ -350,7 +408,7 @@ socket.on("new-transport", user => {
         : 
         (<div className="container my-10">
           {isVisible ? (
-            <form id="join-screen" onSubmit={handleSubmit} className="max-w-9/10 md:max-w-sm mx-auto my-4 p-4 border-2 dark:border-gray-200 border-gray-600">
+            <div id="join-screen" className="max-w-9/10 md:max-w-md mx-auto my-4 p-4 border-2 dark:border-gray-200 border-gray-600">
               <h2 className="dark:text-white text-2xl font-semibold ml-[30%] my-4">Join Room</h2>
               <label className="dark:text-white my-8">
                 Display name:
@@ -372,10 +430,32 @@ socket.on("new-transport", user => {
                 onChange={(e) => setRoomId(e.target.value)}
                 />
               </label>
-              <button id="join-button" className="mt-6 block w-full select-none rounded-lg hover:bg-gray-600 py-3 px-6 text-center align-middle bg-gray-300 dark:bg-gray-800 border border-gray-300 text-gray-900 font-bold uppercase shadow-md shadow-gray-500/20 dark:text-white dark:border-gray-50">Join Meeting</button>
-            </form>
+              <div className="flex items-center justify-center mt-6 gap-2 md:gap-6">
+                <button id="create-button" onClick={createMeet} type="submit" className="submit-button">Create Meeting</button>
+                <button id="join-button" onClick={joinMeet} type="submit" className="submit-button">Join Meeting</button>
+              </div>
+            </div>
           ) : null}
-
+          {showLink ? 
+            <button id="clipboard" onClick={copyLink} class="block mx-auto bg-transparent text-black hover:bg-gray-500 dark:text-white font-semibold hover:text-white px-4 border border-gray-500 dark:border-white hover:border-transparent rounded-lg py-2">
+                <span id="default-message">
+                    <span class="inline-flex items-center">
+                        <svg class="w-3 me-1.5" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 18 20">
+                            <path d="M16 1h-3.278A1.992 1.992 0 0 0 11 0H7a1.993 1.993 0 0 0-1.722 1H2a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2Zm-3 14H5a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2Zm0-4H5a1 1 0 0 1 0-2h8a1 1 0 1 1 0 2Zm0-5H5a1 1 0 0 1 0-2h2V2h4v2h2a1 1 0 1 1 0 2Z"/>
+                        </svg>
+                        <span class="text-s font-semibold">Copy</span>
+                    </span>
+                </span>
+                <span id="success-message" class="hidden">
+                    <span class="inline-flex items-center">
+                        <svg class="w-3 text-blue-700 dark:text-blue-500 me-1.5" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 16 12">
+                            <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M1 5.917 5.724 10.5 15 1.5"/>
+                        </svg>
+                        <span class="text-s font-semibold text-blue-700 dark:text-blue-500">Copied</span>
+                    </span>
+                </span>
+            </button>
+          : null}
           <div className={`grid gap-2 my-4 mx-10 place-items-center ${videos.length === 1 ? "grid-cols-1" : ""} ${videos.length === 2 ? "grid-cols-2" : ""} ${videos.length > 2 ? "grid-cols-3" : ""}`}>
             {videos.map((video) => (
               <div key={video.id} className="video-frame">
