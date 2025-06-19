@@ -1,8 +1,14 @@
 import { React, useState, useRef, useEffect } from 'react';
 import { io } from "socket.io-client";
 import { Device } from "mediasoup-client";
+import SmartVoiceRecorder from 'smartaudiomonitor';
 
-const socket = io();
+const socket = io("https://miewebconfbackend.idcxyz.shop", {
+  transports: ["websocket", "polling"],
+  withCredentials: true
+});
+
+// const socket = io();
 
 socket.on("connect_error", (error) => {
   console.error("WebSocket Connection Error:", error);
@@ -25,7 +31,7 @@ function App() {
   const [isVideoPaused, setIsVideoPaused] = useState(null)
   const [micIcon, setMicIcon] = useState("mic-24.png")
   const [camIcon, setCamIcon] = useState("video-24.png")
-  const [showLink, setShowLink] = useState(false)
+  const [sessionId, setSessionId] = useState(null)
   const [params, setParams] = useState({
     video: {
       track: null,
@@ -51,6 +57,7 @@ function App() {
       // sendTransportConnected.current = true;
       setSendTransportConnected(true)
     }
+    
   }, [producerTransport, params.video.track]);
 
   
@@ -77,13 +84,8 @@ function App() {
       alert("Please enter your username to be displayed in the meeting");
       return;
     }
-    if(room){
-      setRoomId(room)
-    }
-    if(create){
-      setShowLink(true)
-    }
-
+    
+    console.log('roomId', roomId, room)
     try{
       if(username && (roomId || room)){
         navigator.mediaDevices.getUserMedia({ 
@@ -122,7 +124,8 @@ function App() {
           }));
         })
         device = new Device()
-        const param = roomId || room
+        let param = room || roomId
+        console.log('joining room with params', username, param, create)
         socket.emit("joinRoom", {username, param, create}, async(response) =>{
           if(response.rtpCapabilities){
             rtpCapabilities = response.rtpCapabilities
@@ -355,10 +358,18 @@ socket.on("new-transport", user => {
     delPeerTransports()
   })
 
+  socket.on('sessionId', (id) => {
+    console.log('sessionId received from server:', id);
+    setSessionId(id);
+    socket.off('sessionId'); // Remove the listener after receiving the sessionId
+  }
+  );
+
   const createMeet = (e) => {
     e.preventDefault();
     const room = Math.random().toString(36).substring(2, 15)
-    setShowLink(true)
+    console.log('creating room with id:', room, typeof room) 
+    setRoomId(room)
     handleSubmit(e, true, room)
   }
   const joinMeet = (e) => {
@@ -370,31 +381,84 @@ socket.on("new-transport", user => {
         alert("Please enter a room ID")
         return
       }
+    setRoomId(paramId)
     handleSubmit(e, false, paramId)
   }
 }
-
-const copyLink = async(e) => {
+socket.on('startTranscriptions', () => {
+  if(!localStream.current || !localStream.current.getAudioTracks().length) {
+    console.error('No audio track available for transcription');
+    return;
+  }
+  console.log('Starting transcriptions for audio track');
+  const audioOnlyStream = new MediaStream(localStream.current.getAudioTracks());
+  // const processedIndexes = new Set(); // To track processed chunks
+    try{
+        const recorder = new SmartVoiceRecorder(audioOnlyStream)
+        console.log("Creating audio recorder")
+        recorder.startMonitoring();
+        console.log("Audio recorder started")
+        // Start polling for DB recordings every 10 seconds
+        let recordingsInterval;
+        if (recordingsInterval) clearInterval(recordingsInterval);
+        let blobindex = 0
+        recordingsInterval = setInterval(async() => {
+            blobindex += 1
+            const chunks = await recorder.getRecordings()
+            const blob = new Blob(chunks, { type: 'audio/webm;codecs=opus' })
+            socket.emit('audioChunks', {blob,blobindex});
+            for (const chunk of chunks){
+                recorder.deleteRecording(chunk.id)
+                console.log("Deleted recording with ID:", chunk);
+            }
+        }, 1000); // 1 seconds
+        
+    }catch(err){
+        console.error('Something went wrong in processing audioChunks',err)
+    }
+})
+const startTranscriptions = () => {
+  socket.emit('startTranscriptions', roomId);
+}
+const copyLink = async(e, type) => {
+    const successMessage1 = document.getElementById("icon-success1");
+    const defaultMessage1 = document.getElementById("icon-default1");
+    const defaultMessage2 = document.getElementById("icon-default2");
+    const successMessage2 = document.getElementById("icon-success2");
     try{
         e.preventDefault();
-        const defaultMessage = document.getElementById("default-message");
-        const successMessage = document.getElementById("success-message");
-        const windowObject = window.location.href
-        await navigator.clipboard.writeText(`${windowObject}?roomId=${roomId}`);
-        // show the success message
-        defaultMessage.classList.add("hidden");
-        successMessage.classList.remove("hidden");
+        if (type === "meeting"){
+          const windowObject = window.location.href
+          await navigator.clipboard.writeText(`${windowObject}?roomId=${roomId}`)
+          
+          // show the success message
+          defaultMessage1.classList.add("hidden");
+          successMessage1.classList.remove("hidden");
 
-        // Optionally, reset the success message after a few seconds (for example, 2 seconds)
-        setTimeout(function() {
-            defaultMessage.classList.remove("hidden");
-            successMessage.classList.add("hidden");
-            setShowLink(false)
-        }, 2000);
+          // Optionally, reset the success message after a few seconds (for example, 2 seconds)
+          setTimeout(function() {
+              defaultMessage1.classList.remove("hidden");
+              successMessage1.classList.add("hidden");
+          }, 2000);
+        }else if(type === "transcription" && sessionId){
+          await navigator.clipboard.writeText(`https://ai.bluehive.com/session/${sessionId}`)
+          
+          // show the success message
+          defaultMessage2.classList.add("hidden");
+          successMessage2.classList.remove("hidden");
+
+          // Optionally, reset the success message after a few seconds (for example, 2 seconds)
+          setTimeout(function() {
+              defaultMessage2.classList.remove("hidden");
+              successMessage2.classList.add("hidden");
+          }, 2000);
+        }else{
+          alert(`No link to copy for type: ${type}`);
+          return;
+        }
         
     }catch(err){
         console.log('an error occured',err)
-        alert(`Failed to copy meeting link. You can still join using this ID:${roomId}`)
     }
 }
 
@@ -420,46 +484,18 @@ const copyLink = async(e) => {
                 onChange={(e) => setUsername(e.target.value)}
                 />
               </label>
-              <label className="dark:text-white my-8">
-                Room number to join:
-                <input
-                type="text"
-                id="room-id"
-                placeholder="Enter room ID"
-                value={roomId}
-                onChange={(e) => setRoomId(e.target.value)}
-                />
-              </label>
+              
               <div className="flex items-center justify-center mt-6 gap-2 md:gap-6">
                 <button id="create-button" onClick={createMeet} type="submit" className="submit-button">Create Meeting</button>
                 <button id="join-button" onClick={joinMeet} type="submit" className="submit-button">Join Meeting</button>
               </div>
             </div>
           ) : null}
-          {showLink ? 
-            <button id="clipboard" onClick={copyLink} class="block mx-auto bg-transparent text-black hover:bg-gray-500 dark:text-white font-semibold hover:text-white px-4 border border-gray-500 dark:border-white hover:border-transparent rounded-lg py-2">
-                <span id="default-message">
-                    <span class="inline-flex items-center">
-                        <svg class="w-3 me-1.5" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 18 20">
-                            <path d="M16 1h-3.278A1.992 1.992 0 0 0 11 0H7a1.993 1.993 0 0 0-1.722 1H2a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2Zm-3 14H5a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2Zm0-4H5a1 1 0 0 1 0-2h8a1 1 0 1 1 0 2Zm0-5H5a1 1 0 0 1 0-2h2V2h4v2h2a1 1 0 1 1 0 2Z"/>
-                        </svg>
-                        <span class="text-s font-semibold">Copy</span>
-                    </span>
-                </span>
-                <span id="success-message" class="hidden">
-                    <span class="inline-flex items-center">
-                        <svg class="w-3 text-blue-700 dark:text-blue-500 me-1.5" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 16 12">
-                            <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M1 5.917 5.724 10.5 15 1.5"/>
-                        </svg>
-                        <span class="text-s font-semibold text-blue-700 dark:text-blue-500">Copied</span>
-                    </span>
-                </span>
-            </button>
-          : null}
-          <div className={`grid gap-2 my-4 mx-10 place-items-center ${videos.length === 1 ? "grid-cols-1" : ""} ${videos.length === 2 ? "grid-cols-2" : ""} ${videos.length > 2 ? "grid-cols-3" : ""}`}>
+          <div className={`grid [grid-template-columns:repeat(auto-fit,minmax(200px,1fr))] gap-2 my-4 mx-10 place-items-center`}>
             {videos.map((video) => (
               <div key={video.id} className="video-frame">
                 <video
+                    id = {video.id}
                     ref={(videoElement) => {
                         if (videoElement) {
                             videoElement.srcObject = video.stream;
@@ -467,7 +503,6 @@ const copyLink = async(e) => {
                     }}
                     autoPlay
                     playsInline
-                    // muted ={video.id==='local'}
                 />
               <div className="video-username">
               {video.user}
@@ -481,15 +516,99 @@ const copyLink = async(e) => {
         ))}
         </div>
         {isVisible ? null : 
-          <div className="flex items-center justify-center gap-2 md:gap-6 mt-2">
-          <button onClick={handleMuteAudio} className="bg-white-400 border border-gray-400 rounded-full dark:bg-white dark:border-gray-600">
-            <img src={micIcon} alt="Microphone" style={{ cursor: "pointer" }} className="p-3"></img>
-          </button>
-          <button onClick={(e)=>{handleHangup()}} className="custom-button">Leave</button>
-          <button onClick={(e)=>{handleEndMeet()}} className="custom-button">End Meeting</button>
-          <button onClick={handlePauseVideo} className="bg-white-400 border border-gray-400 rounded-full dark:bg-white dark:border-gray-600">
+          <div className="button-container">
+          
+          <div className="relative group inline-block">
+            <button onClick={handleMuteAudio} className="mic-bg">
+              <img src={micIcon} alt="Microphone" style={{ cursor: "pointer" }} className="p-3"></img>
+            </button>
+            <div class="tool-tip-text">
+              Mute/Unmute
+              <div class="tool-tip-arrow"></div>
+            </div>
+          </div>
+          <div className="relative group inline-block">
+              <button
+                id="copyBtn"  onClick={(e) => copyLink(e, "meeting")}
+                className="text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 rounded-full p-3 inline-flex items-center justify-center transition-colors"
+                aria-label="Copy to clipboard"
+              >
+                <span id="icon-default1">
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 18 20" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M16 1h-3.278A1.992 1.992 0 0 0 11 0H7a1.993 1.993 0 0 0-1.722 1H2a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2Zm-3 14H5a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2Zm0-4H5a1 1 0 0 1 0-2h8a1 1 0 1 1 0 2Zm0-5H5a1 1 0 0 1 0-2h2V2h4v2h2a1 1 0 1 1 0 2Z"/>
+                  </svg>
+                </span>
+
+                <span id="icon-success1" class="hidden">
+                  <svg class="w-4 h-4 text-blue-600" fill="none" viewBox="0 0 16 12" xmlns="http://www.w3.org/2000/svg">
+                    <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M1 5.917 5.724 10.5 15 1.5"/>
+                  </svg>
+                </span>
+              </button>
+              <div class="tool-tip-text">
+                Meeting Link
+                <div class="tool-tip-arrow"></div>
+              </div>
+          </div>
+          <div className="relative group inline-block">
+            <button onClick={startTranscriptions} className="mic-bg">
+              <img src="transcriptions.png" alt="Transcriptions Icon" style={{cursor:"pointer"}} className="p-3"></img>
+            </button>
+            <div class="tool-tip-text">
+              Transcribe
+              <div class="tool-tip-arrow"></div>
+            </div>
+          </div>
+          <div className="relative group inline-block">
+              <button
+                id="copyBtn"  onClick={(e) => copyLink(e, "transcription")}
+                class="text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 rounded-full p-3 inline-flex items-center justify-center transition-colors"
+                aria-label="Copy to clipboard"
+              >
+                <span id="icon-default2">
+                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 18 20" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M16 1h-3.278A1.992 1.992 0 0 0 11 0H7a1.993 1.993 0 0 0-1.722 1H2a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2Zm-3 14H5a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2Zm0-4H5a1 1 0 0 1 0-2h8a1 1 0 1 1 0 2Zm0-5H5a1 1 0 0 1 0-2h2V2h4v2h2a1 1 0 1 1 0 2Z"/>
+                  </svg>
+                </span>
+
+                <span id="icon-success2" class="hidden">
+                  <svg class="w-4 h-4 text-blue-600" fill="none" viewBox="0 0 16 12" xmlns="http://www.w3.org/2000/svg">
+                    <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M1 5.917 5.724 10.5 15 1.5"/>
+                  </svg>
+                </span>
+              </button>
+              <div class="tool-tip-text">
+                Transcriptions Link
+                <div class="tool-tip-arrow"></div>
+              </div>
+          </div>
+          <div className="relative group inline-block">
+            <button onClick={(e)=>{handleHangup()}} className="mic-bg">
+              <img src="leaveMeet.png" alt="Leave Meeting" style={{cursor:"pointer"}} className="p-3"></img>
+            </button>
+            <div class="tool-tip-text">
+                Leave Meeting
+                <div class="tool-tip-arrow"></div>
+              </div>
+          </div>
+          <div className="relative group inline-block">
+            <button  onClick={(e)=>{handleEndMeet()}} className="mic-bg">
+              <img src="endMeet.png" alt="End meeting" style={{cursor:"pointer"}} className="p-3"></img>
+            </button>
+            <div class="tool-tip-text">
+                End Meeting
+                <div class="tool-tip-arrow"></div>
+            </div>
+          </div>
+          <div className="relative group inline-block">
+          <button onClick={handlePauseVideo} className="mic-bg">
             <img src={camIcon} alt="Video Icon" style={{cursor:"pointer"}} className="p-3"></img>
           </button>
+          <div class="tool-tip-text">
+              Show/Hide Video
+              <div class="tool-tip-arrow"></div>
+            </div>
+          </div>
         </div>}
         
       </div>)
