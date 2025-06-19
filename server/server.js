@@ -4,43 +4,52 @@ const http = require('http');
 // const { mediasoup } = require('mediasoup');
 const cors = require('cors')
 require('dotenv').config();
+
 const redis = require('redis');
-const { createWorker, getRouter, worker } = require('./mediasoup-config');
+const { createWorkers, getRouter } = require('./mediasoup-config');
 (async () => {
-  await createWorker();
+  await createWorkers();
 })();
 const app = express();
 const server = http.createServer(app);
 
-const io = require("socket.io")(server);
+// const io = require("socket.io")(server);
 
-const path = require('path')
+//for processing audio chunks
+const meteorRandom = require('meteor-random');
+let sessionId = meteorRandom.id(); // Generate a unique session ID
+console.log('Session ID:', sessionId); // Log the session ID for debugging
+// let sessionId = 'Jjwjg6gouWLXhMGKW' //static session ID for testing
+const axios = require('axios');
+const FormData = require('form-data');
+
+// const path = require('path')
 // app.use(express.static(path.join(__dirname, '../client/build')))
-// const io = require("socket.io")(server, {
-//   cors: {
-//     origin: "http://localhost:3000",
-//     methods: ["GET", "POST"],
-//     credentials: true
-//   }
-// });
+const io = require("socket.io")(server, {
+  cors: {
+    origin: "http://localhost:3000",
+    methods: ["GET", "POST"],
+    credentials: true
+  }
+});
 
 // cors setup
-// app.use(cors({ 
-//     origin: "http://localhost:3000", // Allow React frontend
-//     credentials: true  // Allow cookies & authentication headers
-// }));
+app.use(cors({ 
+    origin: "http://localhost:3000", // Allow React frontend
+    credentials: true  // Allow cookies & authentication headers
+}));
 
-// app.use((req, res, next) => {
-//     res.setHeader("Access-Control-Allow-Origin", "http://localhost:3000");
-//     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-//     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-//     res.setHeader("Access-Control-Allow-Credentials", "true");
+app.use((req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "http://localhost:3000");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader("Access-Control-Allow-Credentials", "true");
 
-//     if (req.method === "OPTIONS") {
-//         return res.sendStatus(200);
-//     }
-//     next();
-// });
+    if (req.method === "OPTIONS") {
+        return res.sendStatus(200);
+    }
+    next();
+});
 
 const client = redis.createClient({
   username: 'default',
@@ -57,7 +66,7 @@ client.on('error', err => console.log('Redis Client Error', err));
 
 async function connectRedis() {
   await client.connect();
-  // console.log('Connected to Redis');
+  console.log('Connected to Redis');
 }
 
 // startServer()
@@ -73,11 +82,13 @@ let consumerInfo = new Map();
 io.on("connection", socket =>{
 
   // console.log('new peer connected', socket.id)
-  socket.on('joinRoom', async ({ username, roomId,create }, callback) => {
+  socket.on('joinRoom', async ({ username, param,create }, callback) => {
     socket.io = io
+    const roomId = param;
     socket.join(roomId)
     let router;
-    
+    let uniqueId;
+    console.log
     producerInfo.set(`${roomId}:${username}`, new Map());
     consumerInfo.set(`${roomId}:${username}`, new Map());
     room = await client.exists(`room:${roomId}`);
@@ -87,6 +98,7 @@ io.on("connection", socket =>{
       }
       console.log('creating a new room with id:', roomId, `Adding user:${username}`)
       router = await getRouter(roomId);
+      uniqueId = Math.random().toString(36).substring(2, 15)+Math.random().toString(36).substring(2, 15)
       // console.log('router',router)
       if(router){
         const roomData = {
@@ -265,6 +277,75 @@ io.on("connection", socket =>{
     console.log('consumer resume')
     consumerInfo.get(`${roomId}:${username}`).get('consumers').get(user).resume()
   })
+
+  socket.on('startTranscriptions', ()=>{
+    socket.emit('startTranscriptions')
+  })
+
+  let index = 0;
+  let isProcessing = false;
+  if (sessionId){
+    socket.emit('sessionId', sessionId);
+  }
+ let processed = new Set()
+  socket.on('audioChunks', async (audioChunk, blobindex) => {
+    console.log("Received audio chunk", typeof audioChunk, audioChunk);
+    if (blobindex in processed){
+      return
+    }
+        // Only handle Buffer (socket.io will send as Buffer from Node.js client, or as {type: 'Buffer', data: ...} from some clients)
+        let buf;
+        if (Buffer.isBuffer(audioChunk)) {
+            buf = audioChunk;
+        } else if (audioChunk && audioChunk.type === 'Buffer' && Array.isArray(audioChunk.data)) {
+            buf = Buffer.from(audioChunk.data);
+        } else {
+            console.log("Unknown audioChunk type, skipping.");
+            return;
+        }
+        if (buf.length === 0) {
+            console.log("Skipping empty audio chunk.");
+            return;
+        }
+        if (isProcessing) {
+            console.log("Still processing previous chunk, skipping this one.");
+            return;
+        }
+
+        isProcessing = true;
+        const formData = new FormData();
+        formData.append('index', index );
+        formData.append('type','audio/webm;codecs=opus')
+        formData.append('sessionId', sessionId);
+        formData.append('audioId', uniqueId)
+        formData.append('data', buf, `chunk-${index}`);
+        console.log(index, sessionId, uniqueId, buf, formData.getHeaders())
+        try{
+            console.log('sending audio chunk to Bluehive AI', formData)
+            const response = await axios.post(
+            'https://ai.bluehive.com/api/consume-audio',
+            formData,
+            {
+            headers: {
+                'x-bluehive-authorization': 'FBoYfOkX35nT1Uv3XAinrIPbYGBzZGYQPQc2BUjC8lY',
+                'Origin': 'https://localhost:8181',
+                ...formData.getHeaders()
+                },
+            })
+            console.log(response.data);
+            index++;
+            // callback(`Audio chunk ${index} sent successfully.`);
+            processed.add(blobindex)
+        }catch(err){
+            console.error('Error sending audio chunks to ozwell', err)
+        }
+        finally{
+            isProcessing = false;
+
+        }
+  })
+
+
   socket.on('hangup', async(uname) =>{
     console.log("on one peer left")
     socket.to(roomId).emit('remove video', uname)
@@ -299,6 +380,7 @@ io.on("connection", socket =>{
     }
   })
 
+
   socket.on("end-meeting",async()=>{
     io.to(roomId).emit("remove-all-videos")
     console.log('ending the meeting in ', roomId)
@@ -321,7 +403,7 @@ io.on("connection", socket =>{
 
 const createWebRtcTransport = async (router) => {
   const transport = await router.createWebRtcTransport({
-      listenIps: [{ ip: '127.0.0.1', announcedIp: '127.0.0.1' }],
+      listenIps: [{ ip: '0.0.0.0', announcedIp: '0.0.0.0' }],
       enableUdp: true,
       enableTcp: true,
       preferUdp: true,
@@ -404,12 +486,9 @@ async function stopServer() {
   }catch(e){
     console.error('server closing err:',e)
   }
-  if(worker){
-    await worker.close()
-  }
 }
 
 
-
+startServer()
 
   module.exports = ({startServer, stopServer, io, client});

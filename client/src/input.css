@@ -35,20 +35,32 @@ input{
       @apply h-screen dark:bg-gray-800 justify-center
     }
     .video-frame {
-      @apply border-2 dark:border-gray-200 border-gray-400 rounded-2xl overflow-hidden relative;
+      @apply relative bg-linear-to-br from-gray-300 to-gray-600 aspect-3/2 border-2 dark:border-gray-200 border-gray-400 rounded-2xl overflow-hidden relative;
     }
     
     .video-username {
       @apply absolute top-1 right-1 bg-gray-700 text-white p-2 rounded-md text-sm;
     }
     .custom-button {
-      @apply bg-transparent text-black hover:bg-gray-500 dark:text-white font-semibold hover:text-white py-2 px-4 border border-gray-500 dark:border-white hover:border-transparent rounded-lg;
+      @apply hidden md:block select-none rounded-lg hover:bg-gray-600 py-3 px-6 text-center align-middle bg-gray-300 dark:bg-gray-800 border border-gray-300 text-gray-900 font-bold uppercase shadow-md shadow-gray-500/20 dark:text-white dark:border-gray-50
     }
     input{
       @apply shadow-xs w-full bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 my-1 dark:bg-gray-300 dark:border-gray-600 placeholder-gray-500 dark:bg-gray-700 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500;
     }
     .submit-button{
       @apply block w-full select-none rounded-lg hover:bg-gray-600 py-3 px-6 text-center align-middle bg-gray-300 dark:bg-gray-800 border border-gray-300 text-gray-900 font-bold uppercase shadow-md shadow-gray-500/20 dark:text-white dark:border-gray-50
+    }
+    .mic-bg{
+      @apply bg-white border border-gray-400 rounded-full dark:border-gray-600;
+    }
+    .tool-tip-arrow{
+      @apply absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-black
+    }
+    .tool-tip-text{
+      @apply absolute bottom-full left-1/2 mb-2 w-[120px] -translate-x-1/2 rounded bg-black text-white text-center text-sm px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity z-10
+    }
+    .button-container{
+      @apply fixed bottom-1 left-1/2 -translate-x-1/2 flex items-center justify-center gap-1 md:gap-10 mt-2 flex-wrap w-full;
     }
   }
 
