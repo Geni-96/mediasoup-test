@@ -86,13 +86,14 @@ io.on("connection", socket =>{
     socket.io = io
     const roomId = param;
     socket.join(roomId)
+    socket.roomId = roomId;
     let router;
     let uniqueId;
     console.log
     producerInfo.set(`${roomId}:${username}`, new Map());
     consumerInfo.set(`${roomId}:${username}`, new Map());
     room = await client.exists(`room:${roomId}`);
-    if(create){
+    if(create || !room){
       if(room){
         return callback({error: 'Please try again, room already exists'})
       }
@@ -108,9 +109,7 @@ io.on("connection", socket =>{
       }
     }
     else{
-      if(!room){
-        return callback({error: 'Room not found'})
-      }
+      
       console.log(`Adding ${username} to existing room ${roomId}`)
       const data = await client.get(`room:${roomId}`);
       console.log(data, 'exiting room data')
@@ -119,8 +118,6 @@ io.on("connection", socket =>{
         router = await getRouter(roomId);
         // console.log('router', router)
         room.peers.push(username);
-        socket.emit("newParticipant", room.peers)
-        console.log("emiting event new participant and sending peers:", room.peers)
         await client.set(`room:${roomId}`, JSON.stringify(room));
       }
     }
@@ -138,11 +135,13 @@ io.on("connection", socket =>{
         console.log('Failed to fetch router for this room')
         return
       }
+      
       let producerTransport = await createWebRtcTransport(router)
       let consumerTransport = await createWebRtcTransport(router)
       producerInfo.get(`${roomId}:${username}`).set('producerTransport', producerTransport);
       consumerInfo.get(`${roomId}:${username}`).set('consumerTransport', consumerTransport)
       consumerInfo.get(`${roomId}:${username}`).set('consumers', new Map())
+      console.log(consumerInfo.get(`${roomId}:${username}`).get('consumers'), 'consumers for current user')
       // transports.set(`${username}`, { producer: producerTransport, consumer: consumerTransport})
       // console.log('transports for current user stored in map')
       // await client.set(`producers:${roomId}${username}`,[])
@@ -160,6 +159,7 @@ io.on("connection", socket =>{
         dtlsParameters: consumerTransport.dtlsParameters
       }
       callback({producer:producerOptions,consumer:consumerOptions})
+      
       // console.log('transports created')
       // router.observer.on("newtransport", ()=>{
       //   console.log("new transport created") //not working when the first user transports are created
@@ -171,6 +171,7 @@ io.on("connection", socket =>{
     // console.log('DTLS PARAMS... ', { dtlsParameters },producerTransport)
     await producerInfo.get(`${roomId}:${username}`).get('producerTransport').connect({ dtlsParameters })
     console.log('producer connected')
+    
   })
 
   // see client's socket.emit('transport-produce', ...)
@@ -184,6 +185,7 @@ io.on("connection", socket =>{
     producerInfo.get(`${roomId}:${username}`).set(`${kind}:producer`, producer)
     // console.log('producer from map', producerInfo)
     io.to(roomId).emit("new-transport", username)
+    
     producer.on('transportclose', () => {
       console.log('transport for this producer closed ')
       producer.close()
@@ -210,8 +212,8 @@ io.on("connection", socket =>{
       let roomData = await client.get(`room:${roomId}`);
       room = JSON.parse(roomData)
       const cur_peers = room.peers
-      console.log("current peers in the room", cur_peers, "cur username", username)
       const consumers = consumerInfo.get(`${roomId}:${username}`).get('consumers')
+      console.log("current peers in the room", cur_peers, "cur username", username)
       
       async function createConsumers(curProducer, curPeer){
         if (router.canConsume({
@@ -226,7 +228,7 @@ io.on("connection", socket =>{
             paused: true,
           })
           consumerInfo.get(`${roomId}:${username}`).get('consumers').set(`${curPeer}`, consumer)
-          
+          console.log('consumer created for:', curPeer, consumer.id)
           consumer.on('transportclose', () => {
             console.log('transport close for consumer')
           })
@@ -279,7 +281,8 @@ io.on("connection", socket =>{
   })
 
   socket.on('startTranscriptions', ()=>{
-    socket.emit('startTranscriptions')
+    console.log('emit start transcriptions from server', socket.roomId, roomId)
+    io.to(socket.roomId).emit('transcribe')
   })
 
   let index = 0;
@@ -288,7 +291,7 @@ io.on("connection", socket =>{
     socket.emit('sessionId', sessionId);
   }
  let processed = new Set()
-  socket.on('audioChunks', async (audioChunk, blobindex) => {
+  socket.on('audioChunks', async ({audioChunk, blobindex}) => {
     console.log("Received audio chunk", typeof audioChunk, audioChunk);
     if (blobindex in processed){
       return
@@ -403,7 +406,7 @@ io.on("connection", socket =>{
 
 const createWebRtcTransport = async (router) => {
   const transport = await router.createWebRtcTransport({
-      listenIps: [{ ip: '0.0.0.0', announcedIp: '0.0.0.0' }],
+      listenIps: [{ ip: '0.0.0.0', announcedIp: '127.0.0.1' }],
       enableUdp: true,
       enableTcp: true,
       preferUdp: true,
@@ -438,13 +441,16 @@ const delPeerTransports = async(roomId, uname) =>{
           console.error("Error closing consumer", err);
         }
       }
+      consumerInfo.get(`${roomId}:${uname}`).get('consumers').delete(uname)
     }
 
-    console.log(producerInfo.get(`${roomId}:${uname}`))
+    // console.log(producerInfo.get(`${roomId}:${uname}`))
     producerInfo.get(`${roomId}:${uname}`).get('producerTransport').close();
     consumerInfo.get(`${roomId}:${uname}`).get('consumerTransport').close();
+
     producerInfo.delete(`${roomId}:${uname}`)
     consumerInfo.delete(`${roomId}:${uname}`)
+    console.log("Deleted peer transports for:", uname, roomId, consumerInfo, producerInfo);
   }
   catch(error){
     console.log("Error in deleting peer transports for:", uname, roomId, error)
@@ -491,4 +497,4 @@ async function stopServer() {
 
 startServer()
 
-  module.exports = ({startServer, stopServer, io, client});
+module.exports = ({startServer, stopServer, io, client});
