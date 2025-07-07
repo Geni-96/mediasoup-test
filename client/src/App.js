@@ -70,9 +70,56 @@ function App() {
     setSessionId(id);
   }
   );
+
+  socket.on('remove video', user=>{
+    removeParticipantVideo(user)
+  })
+
+  socket.on("remove-all-videos",()=>{
+    setVideos([])
+    setMeetingEnded(true)
+    delPeerTransports()
+  })
+
+  socket.on('transcribe', () => {
+    console.log('Starting transcriptions for audio track');
+    if(!localStream.current || !localStream.current.getAudioTracks().length) {
+      console.error('No audio track available for transcription');
+      return;
+    }
+    const audioOnlyStream = new MediaStream(localStream.current.getAudioTracks());
+    // const processedIndexes = new Set(); // To track processed chunks
+      try{
+          const recorder = new SmartVoiceRecorder(audioOnlyStream)
+          console.log("Creating audio recorder")
+          recorder.startMonitoring();
+          console.log("Audio recorder started")
+          // Start polling for DB recordings every 10 seconds
+          let recordingsInterval;
+          if (recordingsInterval) clearInterval(recordingsInterval);
+          let blobindex = 0
+          recordingsInterval = setInterval(async() => {
+              blobindex += 1
+              const chunks = await recorder.getRecordings()
+              const audioChunk = new Blob(chunks, { type: 'audio/webm;codecs=opus' })
+              socket.emit('audioChunks', {audioChunk,blobindex});
+              for (const chunk of chunks){
+                  recorder.deleteRecording(chunk.id)
+                  console.log("Deleted recording with ID:", chunk);
+              }
+          }, 1000); // 1 seconds
+          
+      }catch(err){
+          console.error('Something went wrong in processing audioChunks',err)
+      }
+    })
+
   return () => {
     socket.off('new-transport');
     socket.off('sessionId');
+    socket.off('remove video');
+    socket.off('remove-all-videos');
+    socket.off('transcribe');
   };
 }, []);
   
@@ -303,8 +350,6 @@ function App() {
   });
 }
 
-
-
   const handleMuteAudio = () =>{
     const audioTrack = localStream.current?.getAudioTracks()[0];
     if (!audioTrack) return;
@@ -336,6 +381,7 @@ function App() {
     setMeetingEnded(true)
     setVideos([])
     console.log('emitng hangup username', username)
+    // socket.disconnect();
   }
 
   async function delPeerTransports(){
@@ -350,6 +396,7 @@ function App() {
       console.log(localStream, 'local video for me')
       localStream.getTracks().forEach(track => track.stop());
       socket.removeAllListeners();
+      
     }catch(error){
       console.error('error deleting transports for ', username, error)
     }
@@ -358,21 +405,14 @@ function App() {
 
   async function handleEndMeet() {
     socket.emit('end-meeting')
-  }
-
-  
-
-  socket.on('remove video', user=>{
-    removeParticipantVideo(user)
-  })
-
-  socket.on("remove-all-videos",()=>{
-    setVideos([])
+    consumers.current.forEach((value, key) => {
+      if(value!==""){
+        delPeerTransports(key)
+      }
+    })
     setMeetingEnded(true)
-    delPeerTransports()
-  })
-
-  
+    setVideos([])
+  }
 
   const createMeet = (e) => {
     e.preventDefault();
@@ -403,39 +443,6 @@ const startTranscriptions = () => {
     document.getElementById("successAlert").classList.add("hidden");
   }, 2000); // Hide after 2 seconds
 }
-
-socket.on('transcribe', () => {
-  console.log('Starting transcriptions for audio track');
-  if(!localStream.current || !localStream.current.getAudioTracks().length) {
-    console.error('No audio track available for transcription');
-    return;
-  }
-  const audioOnlyStream = new MediaStream(localStream.current.getAudioTracks());
-  // const processedIndexes = new Set(); // To track processed chunks
-    try{
-        const recorder = new SmartVoiceRecorder(audioOnlyStream)
-        console.log("Creating audio recorder")
-        recorder.startMonitoring();
-        console.log("Audio recorder started")
-        // Start polling for DB recordings every 10 seconds
-        let recordingsInterval;
-        if (recordingsInterval) clearInterval(recordingsInterval);
-        let blobindex = 0
-        recordingsInterval = setInterval(async() => {
-            blobindex += 1
-            const chunks = await recorder.getRecordings()
-            const audioChunk = new Blob(chunks, { type: 'audio/webm;codecs=opus' })
-            socket.emit('audioChunks', {audioChunk,blobindex});
-            for (const chunk of chunks){
-                recorder.deleteRecording(chunk.id)
-                console.log("Deleted recording with ID:", chunk);
-            }
-        }, 1000); // 1 seconds
-        
-    }catch(err){
-        console.error('Something went wrong in processing audioChunks',err)
-    }
-})
 
 function closeAlert() {
       const alertBox = document.getElementById("successAlert");

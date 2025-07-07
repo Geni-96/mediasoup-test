@@ -234,6 +234,8 @@ io.on("connection", socket =>{
           })
   
           consumer.on('producerclose', () => {
+            consumerInfo.get(`${roomId}:${username}`).get('consumers').get(`${curPeer}`).close()
+            consumerInfo.get(`${roomId}:${username}`).get('consumers').delete(curPeer)
             console.log('producer of consumer closed')
           })
           // from the consumer extract the following params
@@ -350,10 +352,8 @@ io.on("connection", socket =>{
 
 
   socket.on('hangup', async(uname) =>{
-    console.log("on one peer left")
+    console.log("on one peer left", uname)
     socket.to(roomId).emit('remove video', uname)
-    delPeerTransports(roomId, uname)
-
     //remove peer from redis
     const roomKey = `room:${roomId}`
     const data = await client.get(roomKey);
@@ -364,6 +364,8 @@ io.on("connection", socket =>{
       // Remove the peer from the array
       roomData.peers = roomData.peers.filter(peer => peer !== uname);
       console.log('filetered peers', roomData.peers)
+      
+      delPeerTransports(roomId, uname)
       if(roomData.peers.length===1){
         // io.to(roomId).emit("end-meeting")
         io.to(roomId).emit("remove video", roomData.peers[0])
@@ -382,7 +384,6 @@ io.on("connection", socket =>{
       console.log(`Room ${roomId} or ${uname} not found in Redis`);
     }
   })
-
 
   socket.on("end-meeting",async()=>{
     io.to(roomId).emit("remove-all-videos")
@@ -428,29 +429,16 @@ const createWebRtcTransport = async (router) => {
 const delPeerTransports = async(roomId, uname) =>{
   try{
     console.log('deleting producers, consumers, transports for:', uname)
-    await producerInfo.get(`${roomId}:${uname}`).get('video:producer').close();
-    await producerInfo.get(`${roomId}:${uname}`).get('audio:producer').close();
-    const userConsumers = consumerInfo.get(`${roomId}:${uname}`).get('consumers') || {};
-
-    // Close all consumers
-    for (const peerId in userConsumers) {
-      for (const consumer of Object.values(userConsumers[peerId])) {
-        try {
-          consumer.close();
-        } catch (err) {
-          console.error("Error closing consumer", err);
-        }
-      }
-      consumerInfo.get(`${roomId}:${uname}`).get('consumers').delete(uname)
-    }
-
+    producerInfo.get(`${roomId}:${uname}`).get('video:producer').close();
+    producerInfo.get(`${roomId}:${uname}`).get('audio:producer').close();
+    
     // console.log(producerInfo.get(`${roomId}:${uname}`))
     producerInfo.get(`${roomId}:${uname}`).get('producerTransport').close();
     consumerInfo.get(`${roomId}:${uname}`).get('consumerTransport').close();
 
     producerInfo.delete(`${roomId}:${uname}`)
     consumerInfo.delete(`${roomId}:${uname}`)
-    console.log("Deleted peer transports for:", uname, roomId, consumerInfo, producerInfo);
+    console.log("Deleted peer transports for:", uname, roomId);
   }
   catch(error){
     console.log("Error in deleting peer transports for:", uname, roomId, error)
