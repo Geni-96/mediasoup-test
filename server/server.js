@@ -221,7 +221,7 @@ io.on("connection", socket =>{
           rtpCapabilities
         })) {
           // transport can now consume and return a consumer
-          console.log('router can consume', 'creating consumer for:', curPeer)
+          console.log(`creating consumer for ${curPeer} in ${username}`)
           consumer = await consumerInfo.get(`${roomId}:${username}`).get('consumerTransport').consume({
             producerId: curProducer.id,
             rtpCapabilities,
@@ -234,8 +234,6 @@ io.on("connection", socket =>{
           })
   
           consumer.on('producerclose', () => {
-            consumerInfo.get(`${roomId}:${username}`).get('consumers').get(`${curPeer}`).close()
-            consumerInfo.get(`${roomId}:${username}`).get('consumers').delete(curPeer)
             console.log('producer of consumer closed')
           })
           // from the consumer extract the following params
@@ -365,7 +363,6 @@ io.on("connection", socket =>{
       roomData.peers = roomData.peers.filter(peer => peer !== uname);
       console.log('filetered peers', roomData.peers)
       
-      delPeerTransports(roomId, uname)
       if(roomData.peers.length===1){
         // io.to(roomId).emit("end-meeting")
         io.to(roomId).emit("remove video", roomData.peers[0])
@@ -385,6 +382,12 @@ io.on("connection", socket =>{
     }
   })
 
+  socket.on('peerLeft', (uname) => {
+    console.log('peer left:', uname, 'curuser', username)
+    consumerInfo.get(`${roomId}:${username}`).get('consumers').get(uname).close()
+    consumerInfo.get(`${roomId}:${username}`).get('consumers').delete(uname)
+  })
+  
   socket.on("end-meeting",async()=>{
     io.to(roomId).emit("remove-all-videos")
     console.log('ending the meeting in ', roomId)
@@ -394,7 +397,7 @@ io.on("connection", socket =>{
       // console.log(peers)
       for(const peer of peers){
         console.log('About to delete peer transports for:', roomId, peer, 'inside end meet for loop')
-        delPeerTransports(roomId, peer)
+        delPeerTransports(roomId, peer, peers)
       }
       const result = await client.del(`room:${roomId}`);
       console.log(result, 'result of deleting room data from redis')
@@ -426,7 +429,7 @@ const createWebRtcTransport = async (router) => {
   return transport;
 };
 
-const delPeerTransports = async(roomId, uname) =>{
+const delPeerTransports = async(roomId, uname, peers) =>{
   try{
     console.log('deleting producers, consumers, transports for:', uname)
     producerInfo.get(`${roomId}:${uname}`).get('video:producer').close();
@@ -435,7 +438,7 @@ const delPeerTransports = async(roomId, uname) =>{
     // console.log(producerInfo.get(`${roomId}:${uname}`))
     producerInfo.get(`${roomId}:${uname}`).get('producerTransport').close();
     consumerInfo.get(`${roomId}:${uname}`).get('consumerTransport').close();
-
+    
     producerInfo.delete(`${roomId}:${uname}`)
     consumerInfo.delete(`${roomId}:${uname}`)
     console.log("Deleted peer transports for:", uname, roomId);

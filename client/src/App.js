@@ -73,6 +73,7 @@ function App() {
 
   socket.on('remove video', user=>{
     removeParticipantVideo(user)
+    socket.emit('peerLeft', user)
   })
 
   socket.on("remove-all-videos",()=>{
@@ -132,6 +133,7 @@ function App() {
     setVideos((prevVideos) => prevVideos.filter((video) => video.user !== user)); // Remove participant by username
     consumers.current[user]=false // Reset consumer state for this user
     console.log(`Removed video for user: ${user}`);
+    console.log('remaining participants:', videos);
     if(user===username){
       delPeerTransports()
       setMeetingEnded(true)
@@ -338,7 +340,7 @@ function App() {
 
       // Now add all user streams to the UI
       for (const [user, stream] of userStreams.entries()) {
-        const video_id = Math.floor(Math.random() * 100);
+        const video_id = Math.random().toString(36).substring(2, 15);
         addParticipantVideo(user, video_id, stream); // You might rename this to `addParticipantMedia`
         console.log("added participant media for", user);
         consumers.current[username] = true;
@@ -377,9 +379,9 @@ function App() {
   async function handleHangup(){
     console.log('Exiting user from call:', username)
     socket.emit('hangup', username);
-    delPeerTransports()
     setMeetingEnded(true)
     setVideos([])
+    delPeerTransports()
     console.log('emitng hangup username', username)
     // socket.disconnect();
   }
@@ -389,13 +391,16 @@ function App() {
     try{
       
       producerTransport.close()
-      consumerTransport.current.close()
-      producerTransport = null
-      consumerTransport.current = null
+      consumerTransport.current?.close()
+      // producerTransport = null
+      // consumerTransport.current = null
       const localStream = videos.find(video => video.user === username)?.stream
       console.log(localStream, 'local video for me')
       localStream.getTracks().forEach(track => track.stop());
-      socket.removeAllListeners();
+      setTimeout(() => {
+        socket.removeAllListeners();
+        socket.disconnect()
+      }, 10000);
       
     }catch(error){
       console.error('error deleting transports for ', username, error)
@@ -405,11 +410,11 @@ function App() {
 
   async function handleEndMeet() {
     socket.emit('end-meeting')
-    consumers.current.forEach((value, key) => {
-      if(value!==""){
-        delPeerTransports(key)
+    Object.entries(consumers.current).forEach(([key, value]) => {
+      if (value !== "") {
+        delPeerTransports(key);
       }
-    })
+    });
     setMeetingEnded(true)
     setVideos([])
   }
