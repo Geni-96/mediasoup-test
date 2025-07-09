@@ -7,8 +7,12 @@ import SmartVoiceRecorder from 'smartaudiomonitor';
 //   transports: ["websocket", "polling"],
 //   withCredentials: true
 // });
+const socket = io("https://miewebconf.opensource.mieweb.org", {
+  transports: ["websocket", "polling"],
+  withCredentials: true
+});
 
-const socket = io();
+// const socket = io();
 
 socket.on("connect_error", (error) => {
   console.error("WebSocket Connection Error:", error);
@@ -21,7 +25,7 @@ function App() {
   const [isVisible, setIsVisible] = useState(true)
   const [meetingEnded, setMeetingEnded] = useState(false)
   const curDevice = useRef(null)
-  const [producerTransport, setProducerTransport] = useState(null);
+  const producerTransport = useRef(null);
   const consumers = useRef({});
   const consumerTransport = useRef(null)
   const localStream = useRef(null)
@@ -51,11 +55,11 @@ function App() {
 
   // start producing video and audio tracks when producerTransport is set and video track is available
   useEffect(() => {
-    if (producerTransport?.id && params.video.track) {
+    if (producerTransport.current?.id && params.video.track) {
       connectSendTransport();
     }
     
-  }, [producerTransport, params.video.track]);
+  }, [producerTransport.current, params.video.track, meetingEnded]);
 
   useEffect(() => {
   socket.on("new-transport", async(user) => {
@@ -76,10 +80,12 @@ function App() {
     socket.emit('peerLeft', user)
   })
 
-  socket.on("remove-all-videos",()=>{
-    setVideos([])
+  socket.on("remove-all-videos",async()=>{
+    console.log('removing all videos', username);
     setMeetingEnded(true)
     delPeerTransports()
+    setVideos([])
+    
   })
 
   socket.on('transcribe', () => {
@@ -123,6 +129,16 @@ function App() {
     socket.off('transcribe');
   };
 }, []);
+
+useEffect(() => {
+    socket.on('changeUsername', (newUsername) => {
+    console.log('Username changed to:', newUsername);
+    setUsername(newUsername);
+  });
+  return () =>{
+    socket.off('changeUsername');
+  }
+},[username])
   
  const addParticipantVideo = (user, id, stream) => {
     console.log(stream);
@@ -193,6 +209,11 @@ function App() {
         let param = room || roomId
         console.log('joining room with params', username, param, create)
         socket.emit("joinRoom", {username, param, create}, async(response) =>{
+          if (response.error) {
+            alert(response.error); // or set an error state to show in your UI
+            return;
+          }
+          console.log('response from backend', response)
           if(response.rtpCapabilities){
             rtpCapabilities = response.rtpCapabilities
             await device.load({routerRtpCapabilities: rtpCapabilities})
@@ -203,7 +224,7 @@ function App() {
               const sendTransport = device.createSendTransport(response.producer);
               consumerTransport.current = device.createRecvTransport(response.consumer)
               
-              console.log('transports created on frontend', producerTransport, consumerTransport.current)
+              console.log('transports created on frontend', producerTransport.current, consumerTransport.current)
               
               sendTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {
                 try {
@@ -248,7 +269,7 @@ function App() {
                   errback(error)
                 }
               })
-              setProducerTransport(sendTransport);
+              producerTransport.current = sendTransport
               consumerTransport.current.on('connect', async ({ dtlsParameters }, callback, errback) => {
                 try {
                   // Signal local DTLS parameters to the server side transport
@@ -281,8 +302,8 @@ function App() {
     // this action will trigger the 'connect' and 'produce' events above
     try{
       console.log("connecting send transport and start producing", params)
-      const videoProducer = await producerTransport.produce(params.video)
-      const audioProducer = await producerTransport.produce(params.audio)
+      const videoProducer = await producerTransport.current.produce(params.video)
+      const audioProducer = await producerTransport.current.produce(params.audio)
 
       videoProducer.on('trackended', () => {
         console.log('video track ended')
@@ -390,13 +411,15 @@ function App() {
     console.log('deleting tranports for:',username)
     try{
       
-      producerTransport.close()
+      producerTransport.current.close()
       consumerTransport.current?.close()
       // producerTransport = null
       // consumerTransport.current = null
-      const localStream = videos.find(video => video.user === username)?.stream
-      console.log(localStream, 'local video for me')
-      localStream.getTracks().forEach(track => track.stop());
+      if(localStream.current){
+        localStream.current.getTracks().forEach(track => {
+          track.stop();
+        });
+      }
       setTimeout(() => {
         socket.removeAllListeners();
         socket.disconnect()
@@ -410,13 +433,6 @@ function App() {
 
   async function handleEndMeet() {
     socket.emit('end-meeting')
-    Object.entries(consumers.current).forEach(([key, value]) => {
-      if (value !== "") {
-        delPeerTransports(key);
-      }
-    });
-    setMeetingEnded(true)
-    setVideos([])
   }
 
   const createMeet = (e) => {
@@ -465,7 +481,13 @@ const copyLink = async(e, type) => {
         e.preventDefault();
         if (type === "meeting"){
           const windowObject = window.location.href
-          await navigator.clipboard.writeText(`${windowObject}?roomId=${roomId}`)
+          const paramId = new URLSearchParams(window.location.search).get('roomId');
+          if (!paramId){
+            await navigator.clipboard.writeText(`${windowObject}?roomId=${roomId}`)
+          }
+          else{
+            await navigator.clipboard.writeText(`${windowObject}`)
+          }
           
           // show the success message
           defaultMessage1.classList.add("hidden");

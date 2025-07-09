@@ -13,7 +13,7 @@ const { createWorkers, getRouter } = require('./mediasoup-config');
 const app = express();
 const server = http.createServer(app);
 
-// const io = require("socket.io")(server);
+const io = require("socket.io")(server);
 
 //for processing audio chunks
 const meteorRandom = require('meteor-random');
@@ -23,33 +23,33 @@ console.log('Session ID:', sessionId); // Log the session ID for debugging
 const axios = require('axios');
 const FormData = require('form-data');
 
-// const path = require('path')
-// app.use(express.static(path.join(__dirname, '../client/build')))
-const io = require("socket.io")(server, {
-  cors: {
-    origin: "http://localhost:3000",
-    methods: ["GET", "POST"],
-    credentials: true
-  }
-});
+const path = require('path')
+app.use(express.static(path.join(__dirname, '../client/build')))
+// const io = require("socket.io")(server, {
+//   cors: {
+//     origin: "http://localhost:3000",
+//     methods: ["GET", "POST"],
+//     credentials: true
+//   }
+// });
 
-// cors setup
-app.use(cors({ 
-    origin: "http://localhost:3000", // Allow React frontend
-    credentials: true  // Allow cookies & authentication headers
-}));
+// // cors setup
+// app.use(cors({ 
+//     origin: "http://localhost:3000", // Allow React frontend
+//     credentials: true  // Allow cookies & authentication headers
+// }));
 
-app.use((req, res, next) => {
-    res.setHeader("Access-Control-Allow-Origin", "http://localhost:3000");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-    res.setHeader("Access-Control-Allow-Credentials", "true");
+// app.use((req, res, next) => {
+//     res.setHeader("Access-Control-Allow-Origin", "http://localhost:3000");
+//     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+//     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+//     res.setHeader("Access-Control-Allow-Credentials", "true");
 
-    if (req.method === "OPTIONS") {
-        return res.sendStatus(200);
-    }
-    next();
-});
+//     if (req.method === "OPTIONS") {
+//         return res.sendStatus(200);
+//     }
+//     next();
+// });
 
 const client = redis.createClient({
   username: 'default',
@@ -79,6 +79,7 @@ let room;
 const paramlist = []
 let producerInfo = new Map();
 let consumerInfo = new Map();
+let username;
 io.on("connection", socket =>{
 
   // console.log('new peer connected', socket.id)
@@ -86,12 +87,11 @@ io.on("connection", socket =>{
     socket.io = io
     const roomId = param;
     socket.join(roomId)
+    username = username;
     socket.roomId = roomId;
     let router;
     let uniqueId;
     console.log
-    producerInfo.set(`${roomId}:${username}`, new Map());
-    consumerInfo.set(`${roomId}:${username}`, new Map());
     room = await client.exists(`room:${roomId}`);
     if(create || !room){
       if(room){
@@ -109,19 +109,25 @@ io.on("connection", socket =>{
       }
     }
     else{
-      
       console.log(`Adding ${username} to existing room ${roomId}`)
       const data = await client.get(`room:${roomId}`);
       console.log(data, 'exiting room data')
       if (data){
         room = JSON.parse(data);
+        if (room.peers.includes(username)){
+          console.log(`${username} already exists in room ${roomId}`)
+          username = `${username}-${Math.floor(Math.random() * 10)}`; // append a random number to username
+        }
         router = await getRouter(roomId);
         // console.log('router', router)
         room.peers.push(username);
         await client.set(`room:${roomId}`, JSON.stringify(room));
       }
     }
-    
+    console.log('username after making it unique', username)
+    socket.emit('changeUsername', username)
+    producerInfo.set(`${roomId}:${username}`, new Map());
+    consumerInfo.set(`${roomId}:${username}`, new Map());
     //send router rtpcapabilities to client
     if(router){
       const rtpCapabilities = await router.rtpCapabilities
@@ -365,12 +371,10 @@ io.on("connection", socket =>{
       
       if(roomData.peers.length===1){
         // io.to(roomId).emit("end-meeting")
-        io.to(roomId).emit("remove video", roomData.peers[0])
         delPeerTransports(roomId,username)
         const result = await client.del(`room:${roomId}`);
         console.log(result, 'result of deleting room data from redis')
-        //close router
-        router.close()
+        io.to(roomId).emit("remove-all-videos")
         return
       }
       // Update the Redis entry
@@ -384,12 +388,12 @@ io.on("connection", socket =>{
 
   socket.on('peerLeft', (uname) => {
     console.log('peer left:', uname, 'curuser', username)
-    consumerInfo.get(`${roomId}:${username}`).get('consumers').get(uname).close()
-    consumerInfo.get(`${roomId}:${username}`).get('consumers').delete(uname)
+    consumerInfo.get(`${roomId}:${username}`)?.get('consumers')?.get(uname)?.close()
+    consumerInfo.get(`${roomId}:${username}`)?.get('consumers')?.delete(uname)
   })
   
   socket.on("end-meeting",async()=>{
-    io.to(roomId).emit("remove-all-videos")
+    
     console.log('ending the meeting in ', roomId)
     const data = await client.get(`room:${roomId}`);
     if(data){
@@ -401,16 +405,16 @@ io.on("connection", socket =>{
       }
       const result = await client.del(`room:${roomId}`);
       console.log(result, 'result of deleting room data from redis')
-      //close router
-      router.close()
+      
     }
+    io.to(roomId).emit("remove-all-videos")
   })
   })
 })
 
 const createWebRtcTransport = async (router) => {
   const transport = await router.createWebRtcTransport({
-      listenIps: [{ ip: '0.0.0.0', announcedIp: '127.0.0.1' }],
+      listenIps: [{ ip: '0.0.0.0', announcedIp: 'https://miewebconf.opensource.mieweb.org' }],
       enableUdp: true,
       enableTcp: true,
       preferUdp: true,
@@ -449,7 +453,7 @@ const delPeerTransports = async(roomId, uname, peers) =>{
 }
 
 function startServer(){  
-  server.listen(5001,()=>{
+  server.listen(80,()=>{
     // console.log('started server on port 5001')
   })
   connectRedis();
