@@ -13,7 +13,7 @@ const { createWorkers, getRouter } = require('./mediasoup-config');
 const app = express();
 const server = http.createServer(app);
 
-// const io = require("socket.io")(server);
+const io = require("socket.io")(server);
 
 //for processing audio chunks
 const meteorRandom = require('meteor-random');
@@ -23,33 +23,33 @@ console.log('Session ID:', sessionId); // Log the session ID for debugging
 const axios = require('axios');
 const FormData = require('form-data');
 
-// const path = require('path')
-// app.use(express.static(path.join(__dirname, '../client/build')))
-const io = require("socket.io")(server, {
-  cors: {
-    origin: "http://localhost:3000",
-    methods: ["GET", "POST"],
-    credentials: true
-  }
-});
+const path = require('path')
+app.use(express.static(path.join(__dirname, '../client/build')))
+// const io = require("socket.io")(server, {
+//   cors: {
+//     origin: "http://localhost:3000",
+//     methods: ["GET", "POST"],
+//     credentials: true
+//   }
+// });
 
-// cors setup
-app.use(cors({ 
-    origin: "http://localhost:3000", // Allow React frontend
-    credentials: true  // Allow cookies & authentication headers
-}));
+// // cors setup
+// app.use(cors({ 
+//     origin: "http://localhost:3000", // Allow React frontend
+//     credentials: true  // Allow cookies & authentication headers
+// }));
 
-app.use((req, res, next) => {
-    res.setHeader("Access-Control-Allow-Origin", "http://localhost:3000");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-    res.setHeader("Access-Control-Allow-Credentials", "true");
+// app.use((req, res, next) => {
+//     res.setHeader("Access-Control-Allow-Origin", "http://localhost:3000");
+//     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+//     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+//     res.setHeader("Access-Control-Allow-Credentials", "true");
 
-    if (req.method === "OPTIONS") {
-        return res.sendStatus(200);
-    }
-    next();
-});
+//     if (req.method === "OPTIONS") {
+//         return res.sendStatus(200);
+//     }
+//     next();
+// });
 
 const client = redis.createClient({
   username: 'default',
@@ -79,6 +79,8 @@ let room;
 const paramlist = []
 let producerInfo = new Map();
 let consumerInfo = new Map();
+let botConsumerInfo = new Map()
+let username;
 io.on("connection", socket =>{
 
   // console.log('new peer connected', socket.id)
@@ -86,13 +88,13 @@ io.on("connection", socket =>{
     socket.io = io
     const roomId = param;
     socket.join(roomId)
+    username = username;
+    socket.roomId = roomId;
     let router;
     let uniqueId;
     console.log
-    producerInfo.set(`${roomId}:${username}`, new Map());
-    consumerInfo.set(`${roomId}:${username}`, new Map());
     room = await client.exists(`room:${roomId}`);
-    if(create){
+    if(create || !room){
       if(room){
         return callback({error: 'Please try again, room already exists'})
       }
@@ -108,23 +110,25 @@ io.on("connection", socket =>{
       }
     }
     else{
-      if(!room){
-        return callback({error: 'Room not found'})
-      }
       console.log(`Adding ${username} to existing room ${roomId}`)
       const data = await client.get(`room:${roomId}`);
       console.log(data, 'exiting room data')
       if (data){
         room = JSON.parse(data);
+        if (room.peers.includes(username)){
+          console.log(`${username} already exists in room ${roomId}`)
+          username = `${username}-${Math.floor(Math.random() * 10)}`; // append a random number to username
+        }
         router = await getRouter(roomId);
         // console.log('router', router)
         room.peers.push(username);
-        socket.emit("newParticipant", room.peers)
-        console.log("emiting event new participant and sending peers:", room.peers)
         await client.set(`room:${roomId}`, JSON.stringify(room));
       }
     }
-    
+    console.log('username after making it unique', username)
+    socket.emit('changeUsername', username)
+    producerInfo.set(`${roomId}:${username}`, new Map());
+    consumerInfo.set(`${roomId}:${username}`, new Map());
     //send router rtpcapabilities to client
     if(router){
       const rtpCapabilities = await router.rtpCapabilities
@@ -138,6 +142,7 @@ io.on("connection", socket =>{
         console.log('Failed to fetch router for this room')
         return
       }
+      
       let producerTransport = await createWebRtcTransport(router)
       let consumerTransport = await createWebRtcTransport(router)
       producerInfo.get(`${roomId}:${username}`).set('producerTransport', producerTransport);
@@ -160,6 +165,7 @@ io.on("connection", socket =>{
         dtlsParameters: consumerTransport.dtlsParameters
       }
       callback({producer:producerOptions,consumer:consumerOptions})
+      
       // console.log('transports created')
       // router.observer.on("newtransport", ()=>{
       //   console.log("new transport created") //not working when the first user transports are created
@@ -171,6 +177,7 @@ io.on("connection", socket =>{
     // console.log('DTLS PARAMS... ', { dtlsParameters },producerTransport)
     await producerInfo.get(`${roomId}:${username}`).get('producerTransport').connect({ dtlsParameters })
     console.log('producer connected')
+    
   })
 
   // see client's socket.emit('transport-produce', ...)
@@ -184,6 +191,7 @@ io.on("connection", socket =>{
     producerInfo.get(`${roomId}:${username}`).set(`${kind}:producer`, producer)
     // console.log('producer from map', producerInfo)
     io.to(roomId).emit("new-transport", username)
+    
     producer.on('transportclose', () => {
       console.log('transport for this producer closed ')
       producer.close()
@@ -203,50 +211,17 @@ io.on("connection", socket =>{
   })
 
   socket.on('consume', async ({ rtpCapabilities }, callback) => {
-    
-    const paramsList = []
+    let paramsList = []
+    let audioConsumers = []
+    let videoConsumers = []
     try {
       // check if the router can consume the specified producer
       let roomData = await client.get(`room:${roomId}`);
       room = JSON.parse(roomData)
       const cur_peers = room.peers
-      console.log("current peers in the room", cur_peers, "cur username", username)
       const consumers = consumerInfo.get(`${roomId}:${username}`).get('consumers')
+      console.log("current peers in the room", cur_peers, "cur username", username)
       
-      async function createConsumers(curProducer, curPeer){
-        if (router.canConsume({
-          producerId: curProducer.id,
-          rtpCapabilities
-        })) {
-          // transport can now consume and return a consumer
-          console.log('router can consume', 'creating consumer for:', curPeer)
-          consumer = await consumerInfo.get(`${roomId}:${username}`).get('consumerTransport').consume({
-            producerId: curProducer.id,
-            rtpCapabilities,
-            paused: true,
-          })
-          consumerInfo.get(`${roomId}:${username}`).get('consumers').set(`${curPeer}`, consumer)
-          
-          consumer.on('transportclose', () => {
-            console.log('transport close for consumer')
-          })
-  
-          consumer.on('producerclose', () => {
-            console.log('producer of consumer closed')
-          })
-          // from the consumer extract the following params
-          // to send back to the Client
-          let params = {
-            user: curPeer,
-            id: consumer.id,
-            producerId: producer.id,
-            kind: consumer.kind,
-            rtpParameters: consumer.rtpParameters,
-            resumed:false
-          }
-          paramsList.push(params);
-        }
-      }
       for(const peer of cur_peers){
         if(peer!=username){
           if (!consumers.has(peer)){
@@ -256,14 +231,15 @@ io.on("connection", socket =>{
             let videoProducer = await producerInfo.get(`${roomId}:${peer}`).get('video:producer')
             // console.log('producer for ',peer, producer)
             if (audioProducer) {
-              await createConsumers(audioProducer, peer)
+              audioConsumers = await createConsumers(roomId, username, audioProducer, peer, rtpCapabilities)
             }
             if (videoProducer) {
-              await createConsumers(videoProducer, peer)
+              videoConsumers = await createConsumers(roomId, username, videoProducer, peer, rtpCapabilities)
             }
           }
         }
       }
+      paramsList = audioConsumers.concat(videoConsumers)
       // console.log('paramsList after callback', paramsList)
       callback({paramsList:paramsList})
     } catch (error) {
@@ -278,8 +254,39 @@ io.on("connection", socket =>{
     consumerInfo.get(`${roomId}:${username}`).get('consumers').get(user).resume()
   })
 
-  socket.on('startTranscriptions', ()=>{
-    socket.emit('startTranscriptions')
+  socket.on('startTranscriptions', async()=>{
+    console.log('starting transcriptions')
+    let rtpCapabilities = await router.rtpCapabilities
+    let audioConsumers = []
+    let roomData = await client.get(`room:${roomId}`);
+    room = JSON.parse(roomData)
+    const cur_peers = room.peers
+    botConsumerInfo.set(`${roomId}:bot`, new Map());
+    let botConsumerTransport = await createWebRtcTransport(router)
+    botConsumerInfo.get(`${roomId}:bot`).set('consumerTransport', botConsumerTransport)
+    botConsumerInfo.get(`${roomId}:bot`).set('consumers', new Map())
+    const botConsumers = botConsumerInfo.get(`${roomId}:bot`).get('consumers')
+    for (const peer of cur_peers){
+      if (!botConsumers.has(peer)){
+        console.log(`Bot doesn't have a consumer for ${peer}`)
+        let audioProducer = await producerInfo.get(`${roomId}:${peer}`).get('audio:producer')
+        // console.log('producer for ',peer, producer)
+        if (audioProducer) {
+          audioConsumers = await createConsumers(roomId, 'bot',audioProducer, peer, rtpCapabilities)
+        }
+      }
+    }
+    
+    socket.on('end-transcriptions', async()=>{
+      console.log('ending transcriptions')
+      // close all the bot consumers
+      for(const [peer, consumer] of botConsumers){
+        consumer.close()
+        botConsumers.delete(peer)
+      }
+      botConsumerTransport.close()
+      botConsumerInfo.delete(`${roomId}:bot`)
+    })
   })
 
   let index = 0;
@@ -288,7 +295,7 @@ io.on("connection", socket =>{
     socket.emit('sessionId', sessionId);
   }
  let processed = new Set()
-  socket.on('audioChunks', async (audioChunk, blobindex) => {
+  socket.on('audioChunks', async ({audioChunk, blobindex}) => {
     console.log("Received audio chunk", typeof audioChunk, audioChunk);
     if (blobindex in processed){
       return
@@ -341,16 +348,13 @@ io.on("connection", socket =>{
         }
         finally{
             isProcessing = false;
-
         }
   })
 
 
   socket.on('hangup', async(uname) =>{
-    console.log("on one peer left")
+    console.log("on one peer left", uname)
     socket.to(roomId).emit('remove video', uname)
-    delPeerTransports(roomId, uname)
-
     //remove peer from redis
     const roomKey = `room:${roomId}`
     const data = await client.get(roomKey);
@@ -361,14 +365,13 @@ io.on("connection", socket =>{
       // Remove the peer from the array
       roomData.peers = roomData.peers.filter(peer => peer !== uname);
       console.log('filetered peers', roomData.peers)
+      
       if(roomData.peers.length===1){
         // io.to(roomId).emit("end-meeting")
-        io.to(roomId).emit("remove video", roomData.peers[0])
         delPeerTransports(roomId,username)
         const result = await client.del(`room:${roomId}`);
         console.log(result, 'result of deleting room data from redis')
-        //close router
-        router.close()
+        io.to(roomId).emit("remove-all-videos")
         return
       }
       // Update the Redis entry
@@ -380,9 +383,14 @@ io.on("connection", socket =>{
     }
   })
 
-
+  socket.on('peerLeft', (uname) => {
+    console.log('peer left:', uname, 'curuser', username)
+    consumerInfo.get(`${roomId}:${username}`)?.get('consumers')?.get(uname)?.close()
+    consumerInfo.get(`${roomId}:${username}`)?.get('consumers')?.delete(uname)
+  })
+  
   socket.on("end-meeting",async()=>{
-    io.to(roomId).emit("remove-all-videos")
+    
     console.log('ending the meeting in ', roomId)
     const data = await client.get(`room:${roomId}`);
     if(data){
@@ -390,20 +398,20 @@ io.on("connection", socket =>{
       // console.log(peers)
       for(const peer of peers){
         console.log('About to delete peer transports for:', roomId, peer, 'inside end meet for loop')
-        delPeerTransports(roomId, peer)
+        delPeerTransports(roomId, peer, peers)
       }
       const result = await client.del(`room:${roomId}`);
       console.log(result, 'result of deleting room data from redis')
-      //close router
-      router.close()
+      
     }
+    io.to(roomId).emit("remove-all-videos")
   })
   })
 })
 
 const createWebRtcTransport = async (router) => {
   const transport = await router.createWebRtcTransport({
-      listenIps: [{ ip: '0.0.0.0', announcedIp: '0.0.0.0' }],
+      listenIps: [{ ip: '0.0.0.0', announcedIp: 'https://miewebconf.opensource.mieweb.org' }],
       enableUdp: true,
       enableTcp: true,
       preferUdp: true,
@@ -422,29 +430,56 @@ const createWebRtcTransport = async (router) => {
   return transport;
 };
 
-const delPeerTransports = async(roomId, uname) =>{
+async function createConsumers(roomId, uname, curProducer, curPeer, rtpCapabilities) {
+  const paramsList = []
+  if (!rtpCapabilities || router.canConsume({
+    producerId: curProducer.id,
+    rtpCapabilities
+  })) {
+    // transport can now consume and return a consumer
+    console.log(`creating consumer for ${curPeer} in ${uname}`)
+    consumer = await consumerInfo.get(`${roomId}:${uname}`).get('consumerTransport').consume({
+      producerId: curProducer.id,
+      rtpCapabilities,
+      paused: true,
+    })
+    consumerInfo.get(`${roomId}:${uname}`).get('consumers').set(`${curPeer}`, consumer)
+    console.log('consumer created for:', curPeer, consumer.id)
+    consumer.on('transportclose', () => {
+      console.log('transport close for consumer')
+    })
+
+    consumer.on('producerclose', () => {
+      console.log('producer of consumer closed')
+    })
+    // from the consumer extract the following params
+    // to send back to the Client
+    let params = {
+      user: curPeer,
+      id: consumer.id,
+      producerId: producer.id,
+      kind: consumer.kind,
+      rtpParameters: consumer.rtpParameters,
+      resumed:false
+    }
+    paramsList.push(params);
+  }
+  return paramsList;
+}
+
+const delPeerTransports = async(roomId, uname, peers) =>{
   try{
     console.log('deleting producers, consumers, transports for:', uname)
-    await producerInfo.get(`${roomId}:${uname}`).get('video:producer').close();
-    await producerInfo.get(`${roomId}:${uname}`).get('audio:producer').close();
-    const userConsumers = consumerInfo.get(`${roomId}:${uname}`).get('consumers') || {};
-
-    // Close all consumers
-    for (const peerId in userConsumers) {
-      for (const consumer of Object.values(userConsumers[peerId])) {
-        try {
-          consumer.close();
-        } catch (err) {
-          console.error("Error closing consumer", err);
-        }
-      }
-    }
-
-    console.log(producerInfo.get(`${roomId}:${uname}`))
+    producerInfo.get(`${roomId}:${uname}`).get('video:producer').close();
+    producerInfo.get(`${roomId}:${uname}`).get('audio:producer').close();
+    
+    // console.log(producerInfo.get(`${roomId}:${uname}`))
     producerInfo.get(`${roomId}:${uname}`).get('producerTransport').close();
     consumerInfo.get(`${roomId}:${uname}`).get('consumerTransport').close();
+    
     producerInfo.delete(`${roomId}:${uname}`)
     consumerInfo.delete(`${roomId}:${uname}`)
+    console.log("Deleted peer transports for:", uname, roomId);
   }
   catch(error){
     console.log("Error in deleting peer transports for:", uname, roomId, error)
@@ -452,7 +487,7 @@ const delPeerTransports = async(roomId, uname) =>{
 }
 
 function startServer(){  
-  server.listen(5001,()=>{
+  server.listen(80,()=>{
     // console.log('started server on port 5001')
   })
   connectRedis();
@@ -491,4 +526,4 @@ async function stopServer() {
 
 startServer()
 
-  module.exports = ({startServer, stopServer, io, client});
+module.exports = ({startServer, stopServer, io, client});
