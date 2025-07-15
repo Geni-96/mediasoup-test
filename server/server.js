@@ -276,6 +276,14 @@ io.on("connection", socket =>{
         }
       }
     }
+    for (const botConsumer of audioConsumers){
+      consumer.on('track', (track) => {
+      // Use MediaStream/AudioWorklet to get PCM or encode to WAV
+      // Send via socket to mixing server
+      // sendTrackToMixingServer(track, userId, roomId);
+    });
+    }
+  })
     
     socket.on('end-transcriptions', async()=>{
       console.log('ending transcriptions')
@@ -406,8 +414,8 @@ io.on("connection", socket =>{
     }
     io.to(roomId).emit("remove-all-videos")
   })
-  })
 })
+
 
 const createWebRtcTransport = async (router) => {
   const transport = await router.createWebRtcTransport({
