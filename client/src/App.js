@@ -7,12 +7,12 @@ import SmartVoiceRecorder from 'smartaudiomonitor';
 //   transports: ["websocket", "polling"],
 //   withCredentials: true
 // });
-const socket = io("https://miewebconf.opensource.mieweb.org", {
-  transports: ["websocket", "polling"],
-  withCredentials: true
-});
+// const socket = io("https://miewebconf.opensource.mieweb.org", {
+//   transports: ["websocket", "polling"],
+//   withCredentials: true
+// });
 
-// const socket = io();
+const socket = io();
 
 socket.on("connect_error", (error) => {
   console.error("WebSocket Connection Error:", error);
@@ -52,6 +52,87 @@ function App() {
       appData: { mediaTag: 'audio' }
     }
   })
+
+  // --- Mixed Audio Stream for Transcription ---
+  const audioContextRef = useRef(null);
+  const audioDestinationRef = useRef(null);
+  const audioSourcesRef = useRef({}); // { [user]: { source, track } }
+  const [mixedAudioStream, setMixedAudioStream] = useState(null);
+
+  const startTranscriptions = () => {
+    console.log('Starting transcriptions from frontend:');
+    // Setup audio context and destination if not already
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      audioDestinationRef.current = audioContextRef.current.createMediaStreamDestination();
+    }
+    rebuildMixer();
+    setMixedAudioStream(audioDestinationRef.current.stream);
+    // TODO: Integrate with external transcription engine here using mixedAudioStream
+    document.getElementById("successAlert").classList.remove("hidden");
+    socket.emit('startTranscriptions');
+    setTimeout(() => {
+      document.getElementById("successAlert").classList.add("hidden");
+    }, 2000); // Hide after 2 seconds
+  }
+
+  // Add a track to the mixer
+  function addTrackToMixer(track, user) {
+    if (!audioContextRef.current || !audioDestinationRef.current) return;
+    if (!track) return;
+    if (audioSourcesRef.current[user]) return; // Prevent duplicates
+    try {
+      const stream = new MediaStream([track]);
+      const source = audioContextRef.current.createMediaStreamSource(stream);
+      source.connect(audioDestinationRef.current);
+      audioSourcesRef.current[user] = { source, track };
+    } catch (err) {
+      console.error('Error adding track to mixer for', user, err);
+    }
+  }
+
+  // Remove a track from the mixer
+  function removeTrackFromMixer(user) {
+    const entry = audioSourcesRef.current[user];
+    if (entry) {
+      try {
+        entry.source.disconnect();
+      } catch (e) {}
+      delete audioSourcesRef.current[user];
+    }
+  }
+
+  // Rebuild the mixer (e.g., after a user joins/leaves)
+  function rebuildMixer() {
+    if (!audioContextRef.current || !audioDestinationRef.current) return;
+    // Disconnect all
+    Object.values(audioSourcesRef.current).forEach(({ source }) => {
+      try { source.disconnect(); } catch (e) {}
+    });
+    audioSourcesRef.current = {};
+    // Add local
+    const localAudio = localStream.current?.getAudioTracks?.()[0];
+    if (localAudio) addTrackToMixer(localAudio, username);
+    // Add remote
+    videos.forEach(video => {
+      if (video.user !== username && video.stream) {
+        const remoteAudio = video.stream.getAudioTracks?.()[0];
+        if (remoteAudio) addTrackToMixer(remoteAudio, video.user);
+      }
+    });
+  }
+
+  // Cleanup mixer
+  function stopTranscriptions() {
+    Object.keys(audioSourcesRef.current).forEach(removeTrackFromMixer);
+    audioSourcesRef.current = {};
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+      audioDestinationRef.current = null;
+    }
+    setMixedAudioStream(null);
+  }
 
   // start producing video and audio tracks when producerTransport is set and video track is available
   useEffect(() => {
@@ -116,6 +197,7 @@ useEffect(() => {
   const removeParticipantVideo = (user) => {
     setVideos((prevVideos) => prevVideos.filter((video) => video.user !== user)); // Remove participant by username
     consumers.current[user]=false // Reset consumer state for this user
+    removeTrackFromMixer(user); // Remove from mixer if present
     console.log(`Removed video for user: ${user}`);
     console.log('remaining participants:', videos);
     if(user===username){
@@ -378,25 +460,29 @@ useEffect(() => {
   async function delPeerTransports(){
     console.log('deleting tranports for:',username)
     try{
-      
       producerTransport.current.close()
       consumerTransport.current?.close()
-      // producerTransport = null
-      // consumerTransport.current = null
       if(localStream.current){
         localStream.current.getTracks().forEach(track => {
           track.stop();
         });
       }
+      stopTranscriptions(); // Cleanup mixer on meeting end
       setTimeout(() => {
         socket.removeAllListeners();
         socket.disconnect()
       }, 10000);
-      
     }catch(error){
       console.error('error deleting transports for ', username, error)
     }
     
+  // When videos change (user join/leave), update the mixer if transcription is active
+  useEffect(() => {
+    if (audioContextRef.current && audioDestinationRef.current) {
+      rebuildMixer();
+    }
+    // eslint-disable-next-line
+  }, [videos]);
   }
 
   async function handleEndMeet() {
@@ -424,14 +510,6 @@ useEffect(() => {
   }
 }
 
-const startTranscriptions = () => {
-  console.log('Starting transcriptions from frontend:');
-  document.getElementById("successAlert").classList.remove("hidden");
-  socket.emit('startTranscriptions');
-  setTimeout(() => {
-    document.getElementById("successAlert").classList.add("hidden");
-  }, 2000); // Hide after 2 seconds
-}
 
 function closeAlert() {
       const alertBox = document.getElementById("successAlert");

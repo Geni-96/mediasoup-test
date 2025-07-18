@@ -79,7 +79,7 @@ let room;
 const paramlist = []
 let producerInfo = new Map();
 let consumerInfo = new Map();
-let botConsumerInfo = new Map()
+let botInfo = new Map()
 let username;
 io.on("connection", socket =>{
 
@@ -148,6 +148,7 @@ io.on("connection", socket =>{
       producerInfo.get(`${roomId}:${username}`).set('producerTransport', producerTransport);
       consumerInfo.get(`${roomId}:${username}`).set('consumerTransport', consumerTransport)
       consumerInfo.get(`${roomId}:${username}`).set('consumers', new Map())
+      console.log(consumerInfo.get(`${roomId}:${username}`).get('consumers'), 'consumers for current user')
       // transports.set(`${username}`, { producer: producerTransport, consumer: consumerTransport})
       // console.log('transports for current user stored in map')
       // await client.set(`producers:${roomId}${username}`,[])
@@ -211,9 +212,8 @@ io.on("connection", socket =>{
   })
 
   socket.on('consume', async ({ rtpCapabilities }, callback) => {
-    let paramsList = []
-    let audioConsumers = []
-    let videoConsumers = []
+    
+    const paramsList = []
     try {
       // check if the router can consume the specified producer
       let roomData = await client.get(`room:${roomId}`);
@@ -222,6 +222,40 @@ io.on("connection", socket =>{
       const consumers = consumerInfo.get(`${roomId}:${username}`).get('consumers')
       console.log("current peers in the room", cur_peers, "cur username", username)
       
+      async function createConsumers(curProducer, curPeer){
+        if (router.canConsume({
+          producerId: curProducer.id,
+          rtpCapabilities
+        })) {
+          // transport can now consume and return a consumer
+          console.log(`creating consumer for ${curPeer} in ${username}`)
+          consumer = await consumerInfo.get(`${roomId}:${username}`).get('consumerTransport').consume({
+            producerId: curProducer.id,
+            rtpCapabilities,
+            paused: true,
+          })
+          consumerInfo.get(`${roomId}:${username}`).get('consumers').set(`${curPeer}`, consumer)
+          console.log('consumer created for:', curPeer, consumer.id)
+          consumer.on('transportclose', () => {
+            console.log('transport close for consumer')
+          })
+  
+          consumer.on('producerclose', () => {
+            console.log('producer of consumer closed')
+          })
+          // from the consumer extract the following params
+          // to send back to the Client
+          let params = {
+            user: curPeer,
+            id: consumer.id,
+            producerId: producer.id,
+            kind: consumer.kind,
+            rtpParameters: consumer.rtpParameters,
+            resumed:false
+          }
+          paramsList.push(params);
+        }
+      }
       for(const peer of cur_peers){
         if(peer!=username){
           if (!consumers.has(peer)){
@@ -231,15 +265,14 @@ io.on("connection", socket =>{
             let videoProducer = await producerInfo.get(`${roomId}:${peer}`).get('video:producer')
             // console.log('producer for ',peer, producer)
             if (audioProducer) {
-              audioConsumers = await createConsumers(roomId, username, audioProducer, peer, rtpCapabilities)
+              await createConsumers(audioProducer, peer)
             }
             if (videoProducer) {
-              videoConsumers = await createConsumers(roomId, username, videoProducer, peer, rtpCapabilities)
+              await createConsumers(videoProducer, peer)
             }
           }
         }
       }
-      paramsList = audioConsumers.concat(videoConsumers)
       // console.log('paramsList after callback', paramsList)
       callback({paramsList:paramsList})
     } catch (error) {
@@ -254,110 +287,115 @@ io.on("connection", socket =>{
     consumerInfo.get(`${roomId}:${username}`).get('consumers').get(user).resume()
   })
 
-  socket.on('startTranscriptions', async()=>{
-    console.log('starting transcriptions')
-    let rtpCapabilities = await router.rtpCapabilities
-    let audioConsumers = []
-    let roomData = await client.get(`room:${roomId}`);
-    room = JSON.parse(roomData)
-    const cur_peers = room.peers
-    botConsumerInfo.set(`${roomId}:bot`, new Map());
-    let botConsumerTransport = await createWebRtcTransport(router)
-    botConsumerInfo.get(`${roomId}:bot`).set('consumerTransport', botConsumerTransport)
-    botConsumerInfo.get(`${roomId}:bot`).set('consumers', new Map())
-    const botConsumers = botConsumerInfo.get(`${roomId}:bot`).get('consumers')
-    for (const peer of cur_peers){
-      if (!botConsumers.has(peer)){
-        console.log(`Bot doesn't have a consumer for ${peer}`)
-        let audioProducer = await producerInfo.get(`${roomId}:${peer}`).get('audio:producer')
-        // console.log('producer for ',peer, producer)
-        if (audioProducer) {
-          audioConsumers = await createConsumers(roomId, 'bot',audioProducer, peer, rtpCapabilities)
-        }
-      }
-    }
-    for (const botConsumer of audioConsumers){
-      consumer.on('track', (track) => {
-      // Use MediaStream/AudioWorklet to get PCM or encode to WAV
-      // Send via socket to mixing server
-      // sendTrackToMixingServer(track, userId, roomId);
-    });
-    }
-  })
-    
-    socket.on('end-transcriptions', async()=>{
-      console.log('ending transcriptions')
-      // close all the bot consumers
-      for(const [peer, consumer] of botConsumers){
-        consumer.close()
-        botConsumers.delete(peer)
-      }
-      botConsumerTransport.close()
-      botConsumerInfo.delete(`${roomId}:bot`)
-    })
-  })
+//   socket.on('startTranscriptions', async () => {
+//     const roomData = await client.get(`room:${roomId}`);
+//     const room = JSON.parse(roomData);
+//     const cur_peers = room.peers;
 
-  let index = 0;
-  let isProcessing = false;
-  if (sessionId){
-    socket.emit('sessionId', sessionId);
-  }
- let processed = new Set()
-  socket.on('audioChunks', async ({audioChunk, blobindex}) => {
-    console.log("Received audio chunk", typeof audioChunk, audioChunk);
-    if (blobindex in processed){
-      return
-    }
-        // Only handle Buffer (socket.io will send as Buffer from Node.js client, or as {type: 'Buffer', data: ...} from some clients)
-        let buf;
-        if (Buffer.isBuffer(audioChunk)) {
-            buf = audioChunk;
-        } else if (audioChunk && audioChunk.type === 'Buffer' && Array.isArray(audioChunk.data)) {
-            buf = Buffer.from(audioChunk.data);
-        } else {
-            console.log("Unknown audioChunk type, skipping.");
-            return;
-        }
-        if (buf.length === 0) {
-            console.log("Skipping empty audio chunk.");
-            return;
-        }
-        if (isProcessing) {
-            console.log("Still processing previous chunk, skipping this one.");
-            return;
-        }
+//     const plainTransport = await router.createPlainTransport({
+//       listenIp: '127.0.0.1',
+//       rtcpMux: true,
+//       comedia: false
+//     });
+//     const portBase = 4000; // increment per user
+//     const handshake = {
+//       sessionId,
+//       roomId,
+//       ports: [],
+//     };
 
-        isProcessing = true;
-        const formData = new FormData();
-        formData.append('index', index );
-        formData.append('type','audio/webm;codecs=opus')
-        formData.append('sessionId', sessionId);
-        formData.append('audioId', uniqueId)
-        formData.append('data', buf, `chunk-${index}`);
-        console.log(index, sessionId, uniqueId, buf, formData.getHeaders())
-        try{
-            console.log('sending audio chunk to Bluehive AI', formData)
-            const response = await axios.post(
-            'https://ai.bluehive.com/api/consume-audio',
-            formData,
-            {
-            headers: {
-                'x-bluehive-authorization': 'FBoYfOkX35nT1Uv3XAinrIPbYGBzZGYQPQc2BUjC8lY',
-                'Origin': 'https://localhost:8181',
-                ...formData.getHeaders()
-                },
-            })
-            console.log(response.data);
-            index++;
-            // callback(`Audio chunk ${index} sent successfully.`);
-            processed.add(blobindex)
-        }catch(err){
-            console.error('Error sending audio chunks to ozwell', err)
-        }
-        finally{
-            isProcessing = false;
-        }
-  })
+//     botInfo.set('plainTransport', plainTransport);
+//     botInfo.set('consumers', new Map());
+
+//     for (let i = 0; i < cur_peers.length; i++) {
+//       const peer = cur_peers[i];
+//       const producer = producerInfo.get(`${roomId}:${peer}`).get(`audio:producer`);
+//       const port = portBase + i;
+//       handshake.ports.push({ peerId: peer, port });
+
+//       const consumer = await plainTransport.consume({
+//         producerId: producer.id,
+//         rtpCapabilities: router.rtpCapabilities,
+//         paused: false
+//       });
+
+//       await consumer.setPreferredLayers({ spatialLayer: 0 });
+//       botInfo.get('consumers').set(`${peer}`, consumer);
+//       // Connect to mixer app
+//       await plainTransport.connect({ ip: '127.0.0.1', port });
+//     }
+
+//     // Send handshake
+//     fetch('http://localhost:8000/mixer/start', {
+//       method: 'POST',
+//       headers: { 'Content-Type': 'application/json' },
+//       body: JSON.stringify(handshake),
+//     });
+//   });
+
+
+//   let index = 0;
+//   let isProcessing = false;
+//   if (sessionId){
+//     socket.emit('sessionId', sessionId);
+//   }
+//  let processed = new Set()
+//   socket.on('audioChunks', async ({audioChunk, blobindex}) => {
+//     console.log("Received audio chunk", typeof audioChunk, audioChunk);
+//     if (blobindex in processed){
+//       return
+//     }
+//         // Only handle Buffer (socket.io will send as Buffer from Node.js client, or as {type: 'Buffer', data: ...} from some clients)
+//         let buf;
+//         if (Buffer.isBuffer(audioChunk)) {
+//             buf = audioChunk;
+//         } else if (audioChunk && audioChunk.type === 'Buffer' && Array.isArray(audioChunk.data)) {
+//             buf = Buffer.from(audioChunk.data);
+//         } else {
+//             console.log("Unknown audioChunk type, skipping.");
+//             return;
+//         }
+//         if (buf.length === 0) {
+//             console.log("Skipping empty audio chunk.");
+//             return;
+//         }
+//         if (isProcessing) {
+//             console.log("Still processing previous chunk, skipping this one.");
+//             return;
+//         }
+
+//         isProcessing = true;
+//         const formData = new FormData();
+//         formData.append('index', index );
+//         formData.append('type','audio/webm;codecs=opus')
+//         formData.append('sessionId', sessionId);
+//         formData.append('audioId', uniqueId)
+//         formData.append('data', buf, `chunk-${index}`);
+//         console.log(index, sessionId, uniqueId, buf, formData.getHeaders())
+//         try{
+//             console.log('sending audio chunk to Bluehive AI', formData)
+//             const response = await axios.post(
+//             'https://ai.bluehive.com/api/consume-audio',
+//             formData,
+//             {
+//             headers: {
+//                 'x-bluehive-authorization': 'FBoYfOkX35nT1Uv3XAinrIPbYGBzZGYQPQc2BUjC8lY',
+//                 'Origin': 'https://localhost:8181',
+//                 ...formData.getHeaders()
+//                 },
+//             })
+//             console.log(response.data);
+//             index++;
+//             // callback(`Audio chunk ${index} sent successfully.`);
+//             processed.add(blobindex)
+//         }catch(err){
+//             console.error('Error sending audio chunks to ozwell', err)
+//         }
+//         finally{
+//             isProcessing = false;
+
+//         }
+//   })
 
 
   socket.on('hangup', async(uname) =>{
@@ -391,10 +429,11 @@ io.on("connection", socket =>{
     }
   })
 
-  socket.on('peerLeft', (uname) => {
+  socket.on('peerLeft', async(uname) => {
     console.log('peer left:', uname, 'curuser', username)
     consumerInfo.get(`${roomId}:${username}`)?.get('consumers')?.get(uname)?.close()
     consumerInfo.get(`${roomId}:${username}`)?.get('consumers')?.delete(uname)
+    botInfo?.get('consumers')?.get(uname)?.close()
   })
   
   socket.on("end-meeting",async()=>{
@@ -412,14 +451,20 @@ io.on("connection", socket =>{
       console.log(result, 'result of deleting room data from redis')
       
     }
+    const botConsumers = await botInfo?.get('consumers');
+    for (const [peer, consumer] of botConsumers.entries()) {
+      console.log('closing bot consumer for:', peer)
+      consumer.close();
+    }
+    botInfo?.get('plainTransport')?.close()
     io.to(roomId).emit("remove-all-videos")
+  })
   })
 })
 
-
 const createWebRtcTransport = async (router) => {
   const transport = await router.createWebRtcTransport({
-      listenIps: [{ ip: '0.0.0.0', announcedIp: 'https://miewebconf.opensource.mieweb.org' }],
+      listenIps: [{ ip: '0.0.0.0', announcedIp: '127.0.0.1' }],
       enableUdp: true,
       enableTcp: true,
       preferUdp: true,
@@ -437,43 +482,6 @@ const createWebRtcTransport = async (router) => {
 
   return transport;
 };
-
-async function createConsumers(roomId, uname, curProducer, curPeer, rtpCapabilities) {
-  const paramsList = []
-  if (!rtpCapabilities || router.canConsume({
-    producerId: curProducer.id,
-    rtpCapabilities
-  })) {
-    // transport can now consume and return a consumer
-    console.log(`creating consumer for ${curPeer} in ${uname}`)
-    consumer = await consumerInfo.get(`${roomId}:${uname}`).get('consumerTransport').consume({
-      producerId: curProducer.id,
-      rtpCapabilities,
-      paused: true,
-    })
-    consumerInfo.get(`${roomId}:${uname}`).get('consumers').set(`${curPeer}`, consumer)
-    console.log('consumer created for:', curPeer, consumer.id)
-    consumer.on('transportclose', () => {
-      console.log('transport close for consumer')
-    })
-
-    consumer.on('producerclose', () => {
-      console.log('producer of consumer closed')
-    })
-    // from the consumer extract the following params
-    // to send back to the Client
-    let params = {
-      user: curPeer,
-      id: consumer.id,
-      producerId: producer.id,
-      kind: consumer.kind,
-      rtpParameters: consumer.rtpParameters,
-      resumed:false
-    }
-    paramsList.push(params);
-  }
-  return paramsList;
-}
 
 const delPeerTransports = async(roomId, uname, peers) =>{
   try{
@@ -495,7 +503,7 @@ const delPeerTransports = async(roomId, uname, peers) =>{
 }
 
 function startServer(){  
-  server.listen(80,()=>{
+  server.listen(5001,()=>{
     // console.log('started server on port 5001')
   })
   connectRedis();
