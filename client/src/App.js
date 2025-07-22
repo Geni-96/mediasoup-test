@@ -2,7 +2,7 @@ import { React, useState, useRef, useEffect } from 'react';
 import { io } from "socket.io-client";
 import { Device } from "mediasoup-client";
 import SmartVoiceRecorder from 'smartaudiomonitor';
-
+import MixerPanel from './Mixer';
 // const socket = io("http://localhost:5001", {
 //   transports: ["websocket", "polling"],
 //   withCredentials: true
@@ -29,11 +29,12 @@ function App() {
   const consumers = useRef({});
   const consumerTransport = useRef(null)
   const localStream = useRef(null)
-  const [isAudioMuted, setIsAudioMuted] = useState(null)
-  const [isVideoPaused, setIsVideoPaused] = useState(null)
+  const [isAudioMuted, setIsAudioMuted] = useState(false)
+  const [isVideoPaused, setIsVideoPaused] = useState(false)
   const [micIcon, setMicIcon] = useState("mic-24.png")
   const [camIcon, setCamIcon] = useState("video-24.png")
   const [sessionId, setSessionId] = useState(null)
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [params, setParams] = useState({
     video: {
       track: null,
@@ -59,18 +60,18 @@ function App() {
   const audioSourcesRef = useRef({}); // { [user]: { source, track } }
   const [mixedAudioStream, setMixedAudioStream] = useState(null);
 
-  const startTranscriptions = () => {
-    console.log('Starting transcriptions from frontend:');
+  const startTranscriptions = async () => {
     // Setup audio context and destination if not already
     if (!audioContextRef.current) {
       audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
       audioDestinationRef.current = audioContextRef.current.createMediaStreamDestination();
     }
+    console.log('Starting transcriptions from frontend:');
     rebuildMixer();
-    setMixedAudioStream(audioDestinationRef.current.stream);
     // TODO: Integrate with external transcription engine here using mixedAudioStream
     document.getElementById("successAlert").classList.remove("hidden");
-    socket.emit('startTranscriptions');
+    setIsTranscribing(true);
+    await audioContextRef.current.resume();
     setTimeout(() => {
       document.getElementById("successAlert").classList.add("hidden");
     }, 2000); // Hide after 2 seconds
@@ -81,6 +82,7 @@ function App() {
     if (!audioContextRef.current || !audioDestinationRef.current) return;
     if (!track) return;
     if (audioSourcesRef.current[user]) return; // Prevent duplicates
+    console.log(`Adding track for user: ${user}`, track);
     try {
       const stream = new MediaStream([track]);
       const source = audioContextRef.current.createMediaStreamSource(stream);
@@ -93,6 +95,7 @@ function App() {
 
   // Remove a track from the mixer
   function removeTrackFromMixer(user) {
+    console.log(`Removing track for user: ${user}`);
     const entry = audioSourcesRef.current[user];
     if (entry) {
       try {
@@ -103,27 +106,34 @@ function App() {
   }
 
   // Rebuild the mixer (e.g., after a user joins/leaves)
-  function rebuildMixer() {
+  async function rebuildMixer() {
     if (!audioContextRef.current || !audioDestinationRef.current) return;
     // Disconnect all
     Object.values(audioSourcesRef.current).forEach(({ source }) => {
       try { source.disconnect(); } catch (e) {}
     });
     audioSourcesRef.current = {};
+    console.log('Rebuilding mixer for user:', username);
     // Add local
     const localAudio = localStream.current?.getAudioTracks?.()[0];
     if (localAudio) addTrackToMixer(localAudio, username);
+    console.log('Local audio track added to mixer', localAudio);
     // Add remote
     videos.forEach(video => {
       if (video.user !== username && video.stream) {
         const remoteAudio = video.stream.getAudioTracks?.()[0];
+        console.log(remoteAudio, 'remoteaudio tracks')
         if (remoteAudio) addTrackToMixer(remoteAudio, video.user);
       }
     });
+    await audioContextRef.current.resume();
+    setMixedAudioStream(audioDestinationRef.current.stream);
+
   }
 
   // Cleanup mixer
   function stopTranscriptions() {
+    console.log('Stopping transcriptions');
     Object.keys(audioSourcesRef.current).forEach(removeTrackFromMixer);
     audioSourcesRef.current = {};
     if (audioContextRef.current) {
@@ -132,6 +142,7 @@ function App() {
       audioDestinationRef.current = null;
     }
     setMixedAudioStream(null);
+    setIsTranscribing(false);
   }
 
   // start producing video and audio tracks when producerTransport is set and video track is available
@@ -188,6 +199,14 @@ useEffect(() => {
     socket.off('changeUsername');
   }
 },[username])
+
+// When videos change (user join/leave), update the mixer if transcription is active
+  useEffect(() => {
+    if (audioContextRef.current && audioDestinationRef.current) {
+      rebuildMixer();
+    }
+    // eslint-disable-next-line
+  }, [videos]);
   
  const addParticipantVideo = (user, id, stream) => {
     console.log(stream);
@@ -244,6 +263,12 @@ useEffect(() => {
           const videoTrack = stream.getVideoTracks()[0]
           const audioTrack = stream.getAudioTracks()[0]
           // console.log('printing local stream', stream)
+          // Initialize mute states based on actual track states
+          setIsAudioMuted(!audioTrack.enabled);
+          setIsVideoPaused(!videoTrack.enabled);
+          setMicIcon(!audioTrack.enabled ? "mute-24.png" : "mic-24.png");
+          setCamIcon(!videoTrack.enabled ? "no-video-24.png" : "video-24.png");
+          
           setParams(prev => ({
             video: {
               ...prev.video,
@@ -433,6 +458,11 @@ useEffect(() => {
     setMicIcon(newMutedState ? "mute-24.png" : "mic-24.png");
 
     console.log(`Audio ${newMutedState ? "muted" : "unmuted"}.`);
+
+    // Rebuild mixer to reflect mute state changes
+    if (audioContextRef.current && audioDestinationRef.current) {
+      rebuildMixer();
+    }
   }
 
   const handlePauseVideo = ()=>{
@@ -475,14 +505,6 @@ useEffect(() => {
     }catch(error){
       console.error('error deleting transports for ', username, error)
     }
-    
-  // When videos change (user join/leave), update the mixer if transcription is active
-  useEffect(() => {
-    if (audioContextRef.current && audioDestinationRef.current) {
-      rebuildMixer();
-    }
-    // eslint-disable-next-line
-  }, [videos]);
   }
 
   async function handleEndMeet() {
@@ -721,7 +743,12 @@ const copyLink = async(e, type) => {
             </div>
           </div>
         </div>}
-        
+        <MixerPanel
+          onStart={startTranscriptions}
+          onStop={stopTranscriptions}
+          mixedAudioStream={mixedAudioStream}
+          isTranscribing={isTranscribing}
+        />
       </div>)
       }
     </div>
