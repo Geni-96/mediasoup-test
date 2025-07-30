@@ -1,6 +1,8 @@
 // src/server.js
 const express = require('express');
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 // const { mediasoup } = require('mediasoup');
 const cors = require('cors')
 require('dotenv').config();
@@ -23,7 +25,6 @@ console.log('Session ID:', sessionId); // Log the session ID for debugging
 const axios = require('axios');
 const FormData = require('form-data');
 
-const path = require('path')
 app.use(express.static(path.join(__dirname, '../client/build')))
 // const io = require("socket.io")(server, {
 //   cors: {
@@ -81,6 +82,183 @@ let producerInfo = new Map();
 let consumerInfo = new Map();
 let botInfo = new Map()
 let username;
+
+// Speaker Diarization System
+const audioLevelObservers = new Map(); // roomId -> AudioLevelObserver
+const speakerLogs = new Map(); // roomId -> { [user]: { speaking: boolean, startTime: number } }
+const speakerTimelines = new Map(); // roomId -> [{ user, start, end }]
+
+// Speaker diarization functions
+function initializeSpeakerDiarization(roomId) {
+  if (!speakerLogs.has(roomId)) {
+    speakerLogs.set(roomId, {});
+    speakerTimelines.set(roomId, []);
+    console.log(`Initialized speaker diarization for room: ${roomId}`);
+  }
+}
+
+async function createAudioLevelObserver(router, roomId) {
+  try {
+    const audioLevelObserver = await router.createAudioLevelObserver({
+      maxEntries: 10,
+      threshold: -50, // dBFS
+      interval: 100   // ms
+    });
+
+    audioLevelObserver.on('volumes', (volumes) => {
+      const now = Date.now() / 1000; // Convert to seconds
+      const currentSpeakers = speakerLogs.get(roomId) || {};
+      const timeline = speakerTimelines.get(roomId) || [];
+
+      // Process current speaking participants
+      const activeSpeakers = new Set();
+      volumes.forEach(({ producer, volume }) => {
+        // Find the username associated with this producer
+        for (const [key, producerMap] of producerInfo.entries()) {
+          if (key.startsWith(`${roomId}:`)) {
+            const user = key.split(':')[1];
+            const audioProducer = producerMap.get('audio:producer');
+            if (audioProducer && audioProducer.id === producer.id) {
+              activeSpeakers.add(user);
+              
+              // Start speaking event
+              if (!currentSpeakers[user] || !currentSpeakers[user].speaking) {
+                currentSpeakers[user] = { speaking: true, startTime: now };
+                console.log(`${user} started speaking at ${now}`);
+              }
+            }
+          }
+        }
+      });
+
+      // Process users who stopped speaking
+      Object.keys(currentSpeakers).forEach(user => {
+        if (currentSpeakers[user].speaking && !activeSpeakers.has(user)) {
+          const endTime = now;
+          const startTime = currentSpeakers[user].startTime;
+          
+          // Add to timeline
+          timeline.push({
+            user,
+            start: startTime,
+            end: endTime
+          });
+          
+          currentSpeakers[user].speaking = false;
+          console.log(`${user} stopped speaking. Duration: ${endTime - startTime}s`);
+        }
+      });
+
+      speakerLogs.set(roomId, currentSpeakers);
+      speakerTimelines.set(roomId, timeline);
+    });
+
+    audioLevelObserver.on('silence', () => {
+      // Handle silence - end all current speaking sessions
+      const now = Date.now() / 1000;
+      const currentSpeakers = speakerLogs.get(roomId) || {};
+      const timeline = speakerTimelines.get(roomId) || [];
+
+      Object.keys(currentSpeakers).forEach(user => {
+        if (currentSpeakers[user].speaking) {
+          timeline.push({
+            user,
+            start: currentSpeakers[user].startTime,
+            end: now
+          });
+          currentSpeakers[user].speaking = false;
+          console.log(`${user} stopped speaking (silence detected)`);
+        }
+      });
+
+      speakerLogs.set(roomId, currentSpeakers);
+      speakerTimelines.set(roomId, timeline);
+    });
+
+    audioLevelObservers.set(roomId, audioLevelObserver);
+    console.log(`Created AudioLevelObserver for room: ${roomId}`);
+    return audioLevelObserver;
+  } catch (error) {
+    console.error(`Error creating AudioLevelObserver for room ${roomId}:`, error);
+    throw error;
+  }
+}
+
+function addProducerToObserver(roomId, producer) {
+  const observer = audioLevelObservers.get(roomId);
+  if (observer && producer.kind === 'audio') {
+    observer.addProducer({ producerId: producer.id });
+    console.log(`Added audio producer to observer for room: ${roomId}`);
+  }
+}
+
+function removeProducerFromObserver(roomId, producer) {
+  const observer = audioLevelObservers.get(roomId);
+  if (observer && producer.kind === 'audio') {
+    observer.removeProducer({ producerId: producer.id });
+    console.log(`Removed audio producer from observer for room: ${roomId}`);
+  }
+}
+
+async function writeSpeakerLogToFile(roomId, sessionId) {
+  const timeline = speakerTimelines.get(roomId) || [];
+  const logData = {
+    roomId,
+    sessionId,
+    timestamp: new Date().toISOString(),
+    speakers: timeline
+  };
+
+  const logDir = path.join(__dirname, '../logs');
+  
+  // Ensure logs directory exists
+  if (!fs.existsSync(logDir)) {
+    fs.mkdirSync(logDir, { recursive: true });
+  }
+
+  try {
+    // Write room-based log
+    const roomLogPath = path.join(logDir, `speaker-log-${roomId}.json`);
+    fs.writeFileSync(roomLogPath, JSON.stringify(logData, null, 2));
+    
+    // Write session-based log
+    // const sessionLogPath = path.join(logDir, `speaker-log-${sessionId}.json`);
+    // fs.writeFileSync(sessionLogPath, JSON.stringify(logData, null, 2));
+    
+    console.log(`Speaker logs written for room ${roomId} and session ${sessionId}`);
+    console.log(`Total speaking events: ${timeline.length}`);
+  } catch (error) {
+    console.error(`Error writing speaker log for room ${roomId}:`, error);
+  }
+}
+
+function cleanupSpeakerDiarization(roomId) {
+  // Finalize any ongoing speaking sessions
+  const now = Date.now() / 1000;
+  const currentSpeakers = speakerLogs.get(roomId) || {};
+  const timeline = speakerTimelines.get(roomId) || [];
+
+  Object.keys(currentSpeakers).forEach(user => {
+    if (currentSpeakers[user].speaking) {
+      timeline.push({
+        user,
+        start: currentSpeakers[user].startTime,
+        end: now
+      });
+    }
+  });
+
+  speakerTimelines.set(roomId, timeline);
+
+  // Close and remove observer
+  const observer = audioLevelObservers.get(roomId);
+  if (observer) {
+    observer.close();
+    audioLevelObservers.delete(roomId);
+  }
+
+  console.log(`Cleaned up speaker diarization for room: ${roomId}`);
+}
 io.on("connection", socket =>{
 
   // console.log('new peer connected', socket.id)
@@ -107,6 +285,10 @@ io.on("connection", socket =>{
           peers: [username]
         };
         await client.set(`room:${roomId}`, JSON.stringify(roomData));
+        
+        // Initialize speaker diarization for new room
+        initializeSpeakerDiarization(roomId);
+        await createAudioLevelObserver(router, roomId);
       }
     }
     else{
@@ -123,6 +305,12 @@ io.on("connection", socket =>{
         // console.log('router', router)
         room.peers.push(username);
         await client.set(`room:${roomId}`, JSON.stringify(room));
+        
+        // Initialize speaker diarization if not already done
+        if (!speakerLogs.has(roomId)) {
+          initializeSpeakerDiarization(roomId);
+          await createAudioLevelObserver(router, roomId);
+        }
       }
     }
     console.log('username after making it unique', username)
@@ -190,11 +378,21 @@ io.on("connection", socket =>{
       rtpParameters,
     })
     producerInfo.get(`${roomId}:${username}`).set(`${kind}:producer`, producer)
+    
+    // Add audio producer to speaker diarization observer
+    if (kind === 'audio') {
+      addProducerToObserver(roomId, producer);
+    }
+    
     // console.log('producer from map', producerInfo)
     io.to(roomId).emit("new-transport", username)
     
     producer.on('transportclose', () => {
       console.log('transport for this producer closed ')
+      // Remove from observer before closing
+      if (kind === 'audio') {
+        removeProducerFromObserver(roomId, producer);
+      }
       producer.close()
     })
 
@@ -415,6 +613,11 @@ io.on("connection", socket =>{
       if(roomData.peers.length===1){
         // io.to(roomId).emit("end-meeting")
         delPeerTransports(roomId,username)
+        
+        // Write final speaker log and cleanup
+        await writeSpeakerLogToFile(roomId, sessionId);
+        cleanupSpeakerDiarization(roomId);
+        
         const result = await client.del(`room:${roomId}`);
         console.log(result, 'result of deleting room data from redis')
         io.to(roomId).emit("remove-all-videos")
@@ -447,6 +650,11 @@ io.on("connection", socket =>{
         console.log('About to delete peer transports for:', roomId, peer, 'inside end meet for loop')
         delPeerTransports(roomId, peer, peers)
       }
+      
+      // Write final speaker log and cleanup
+      await writeSpeakerLogToFile(roomId, sessionId);
+      cleanupSpeakerDiarization(roomId);
+      
       const result = await client.del(`room:${roomId}`);
       console.log(result, 'result of deleting room data from redis')
       
@@ -486,8 +694,18 @@ const createWebRtcTransport = async (router) => {
 const delPeerTransports = async(roomId, uname, peers) =>{
   try{
     console.log('deleting producers, consumers, transports for:', uname)
-    producerInfo.get(`${roomId}:${uname}`).get('video:producer').close();
-    producerInfo.get(`${roomId}:${uname}`).get('audio:producer').close();
+    
+    // Remove producers from observer before closing
+    const videoProducer = producerInfo.get(`${roomId}:${uname}`).get('video:producer');
+    const audioProducer = producerInfo.get(`${roomId}:${uname}`).get('audio:producer');
+    
+    if (audioProducer) {
+      removeProducerFromObserver(roomId, audioProducer);
+      audioProducer.close();
+    }
+    if (videoProducer) {
+      videoProducer.close();
+    }
     
     // console.log(producerInfo.get(`${roomId}:${uname}`))
     producerInfo.get(`${roomId}:${uname}`).get('producerTransport').close();
