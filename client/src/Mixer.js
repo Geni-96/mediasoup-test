@@ -1,10 +1,13 @@
 import React, { useState } from "react";
+import { uploadMixedAudioToIndexedCP, isIndexedCPAvailable } from './indexedcp-client';
 
 export default function MixerPanel({
   onStart,
   onStop,
   mixedAudioStream,
   isTranscribing,
+  roomId,
+  sessionId,
 }) {
   const [isRecording, setIsRecording] = useState(false);
 
@@ -24,11 +27,29 @@ export default function MixerPanel({
     if (e.data.size > 0) chunks.push(e.data);
   };
 
-  recorder.onstop = () => {
+  recorder.onstop = async () => {
     const blob = new Blob(chunks, { type: "audio/webm" });
     const url = URL.createObjectURL(blob);
     
-    // Create download link for the audio file directly
+    // Upload to IndexedCP if available and we have roomId/sessionId
+    if (roomId && sessionId && isIndexedCPAvailable()) {
+      console.log('Uploading mixed audio to IndexedCP...');
+      try {
+        const uploadSuccess = await uploadMixedAudioToIndexedCP(roomId, sessionId, blob, 'webm');
+        if (uploadSuccess) {
+          console.log('✅ Mixed audio uploaded to IndexedCP successfully');
+        } else {
+          console.log('⚠️ Mixed audio upload to IndexedCP failed, but continuing normally');
+        }
+      } catch (error) {
+        console.error('Mixed audio upload error:', error.message);
+        // Non-disruptive: continue with local download even if upload fails
+      }
+    } else {
+      console.log('IndexedCP not available or missing room/session info, skipping upload');
+    }
+    
+    // Create download link for the audio file directly (existing functionality)
     const downloadLink = document.createElement("a");
     downloadLink.href = url;
     downloadLink.download = `mixed_audio_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.webm`;

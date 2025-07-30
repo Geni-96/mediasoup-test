@@ -1,8 +1,8 @@
 import { React, useState, useRef, useEffect } from 'react';
 import { io } from "socket.io-client";
 import { Device } from "mediasoup-client";
-import SmartVoiceRecorder from 'smartaudiomonitor';
 import MixerPanel from './Mixer';
+import { initializeIndexedCP, uploadMixedAudioToIndexedCP, isIndexedCPAvailable } from './indexedcp-client';
 // const socket = io("http://localhost:5001", {
 //   transports: ["websocket", "polling"],
 //   withCredentials: true
@@ -134,6 +134,40 @@ function App() {
   // Cleanup mixer
   function stopTranscriptions() {
     console.log('Stopping transcriptions');
+    
+    // Auto-upload mixed audio when transcription stops (if available)
+    if (roomId && sessionId && mixedAudioStream && isIndexedCPAvailable()) {
+      console.log('Auto-uploading mixed audio to IndexedCP on transcription stop...');
+      
+      // Create a short recording of the current mixed stream
+      const recorder = new MediaRecorder(mixedAudioStream, {
+        mimeType: 'audio/webm;codecs=opus'
+      });
+      const chunks = [];
+      
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+      
+      recorder.onstop = async () => {
+        if (chunks.length > 0) {
+          const blob = new Blob(chunks, { type: "audio/webm" });
+          try {
+            const uploadSuccess = await uploadMixedAudioToIndexedCP(roomId, sessionId, blob, 'webm');
+            if (uploadSuccess) {
+              console.log('✅ Auto-uploaded mixed audio to IndexedCP on transcription stop');
+            }
+          } catch (error) {
+            console.error('Auto-upload error:', error.message);
+          }
+        }
+      };
+      
+      // Record for a short duration to capture final state
+      recorder.start();
+      setTimeout(() => recorder.stop(), 1000);
+    }
+    
     Object.keys(audioSourcesRef.current).forEach(removeTrackFromMixer);
     audioSourcesRef.current = {};
     if (audioContextRef.current) {
@@ -152,6 +186,13 @@ function App() {
     }
     
   }, [producerTransport.current, params.video.track, meetingEnded]);
+
+  // Initialize IndexedCP client on app startup (non-disruptive)
+  useEffect(() => {
+    initializeIndexedCP().catch(error => {
+      console.error('Frontend IndexedCP initialization failed, continuing without it:', error.message);
+    });
+  }, []);
 
   useEffect(() => {
   socket.on("new-transport", async(user) => {
@@ -241,20 +282,19 @@ useEffect(() => {
       }
       if(username && (roomId || room)){
         navigator.mediaDevices.getUserMedia({ 
-          audio: true, 
-          video: true, 
           audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          googEchoCancellation: true,
-          googAutoGainControl: true,
-          googNoiseSuppression: true,
-          googHighpassFilter: true,
-          googTypingNoiseDetection: true,
-          googNoiseReduction: true,
-          volume: 1.0,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            googEchoCancellation: true,
+            googAutoGainControl: true,
+            googNoiseSuppression: true,
+            googHighpassFilter: true,
+            googTypingNoiseDetection: true,
+            googNoiseReduction: true,
+            volume: 1.0,
           }, 
+          video: true
           })
         .then(async (stream) => {
           addParticipantVideo(username,'local', stream);
@@ -749,6 +789,8 @@ const copyLink = async(e, type) => {
           onStop={stopTranscriptions}
           mixedAudioStream={mixedAudioStream}
           isTranscribing={isTranscribing}
+          roomId={roomId}
+          sessionId={sessionId}
         />
       </div>)
       }
