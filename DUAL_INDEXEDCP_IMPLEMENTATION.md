@@ -1,49 +1,27 @@
 # Dual IndexedCP Client Implementation
 
 ## Overview
-Successfully implemented dual IndexedCP clients for direct audio and annotation upload as per the r### Installation
-
-### Frontend Setup
-```bash
-cd client
-npm install  # No additional dependencies needed
-cp .env.example .env  # Configure if needed
-npm start
-```
-
-### Backend Setup (Already Done)
-```bash
-cd server
-npm install  # IndexedCP already installed
-cp .env.example .env  # Configure if needed
-npm start
-```
-
-## Benefits Achieved
-
-✅ **Performance**: Direct uploads, no audio data through backend sockets  
-✅ **Scalability**: Independent upload processes  
-✅ **Simplicity**: Each side handles its own data  
-✅ **Reliability**: One client failure doesn't affect the other  
-✅ **Non-Disruptive**: All existing functionality works exactly as before  
-✅ **Browser Compatible**: Frontend uses fetch API, no Node.js dependencies   implementation provides separate frontend and backend clients that independently upload their respective data to IndexedCP with consistent naming conventions.
+Successfully implemented dual IndexedCP clients for direct audio and annotation upload. The frontend now uses a browser-compatible implementation that follows the official IndexedCP protocol, providing consistency with the backend while maintaining full browser compatibility.
 
 ## ✅ Implementation Status
 
 ### Backend Integration (Already Completed)
-- [x] IndexedCP package installed and configured
+- [x] IndexedCP package installed and configured  
 - [x] IndexedCP client instance created (`indexedcp-client.js`)
 - [x] IndexedCP upload added to `writeSpeakerLogToFile()` - non-disruptive
 - [x] Server startup initialization of IndexedCP client
 - [x] All existing speaker diarization and logging functionality preserved
 
-### Frontend Integration (Newly Implemented)
-- [x] Browser-compatible IndexedCP client created (using fetch API)
-- [x] Frontend IndexedCP client configuration created
+### Frontend Integration (Updated to Official Protocol)
+- [x] **UPDATED**: Browser-compatible IndexedCP client following official protocol
+- [x] IndexedCP package dependency added to package.json  
+- [x] Same chunking approach as official package (1MB chunks)
+- [x] Same upload protocol with authentication headers
+- [x] IndexedDB storage for chunk management
 - [x] Direct upload of mixed audio files to IndexedCP when recording completes
 - [x] Consistent naming: `${roomId}-${sessionId}-audio.webm`
 - [x] All existing audio mixing and recording functionality preserved
-- [x] No Node.js dependencies - fully browser compatible
+- [x] Full browser compatibility without Node.js dependencies
 
 ## Architecture
 
@@ -52,10 +30,10 @@ npm start
 │   Frontend      │───▶│   IndexedCP      │    │   Backend       │
 │                 │    │   Server         │◀───│                 │
 │ • Mixed Audio   │    │                  │    │ • Speaker Logs  │
-│ • Direct Upload │    │ • Audio Files    │    │ • Direct Upload │
-│                 │    │ • Annotations    │    │                 │
-└─────────────────┘    │ • Metadata       │    └─────────────────┘
-                       └─────────────────┘
+│ • Protocol-     │    │ • Audio Files    │    │ • Direct Upload │
+│   Compatible    │    │ • Annotations    │    │                 │
+│   Upload        │    │ • Metadata       │    └─────────────────┘
+└─────────────────┘    └──────────────────┘
                                │
                                ▼
                        ┌──────────────────┐
@@ -64,6 +42,24 @@ npm start
                        │ • logs/*.json    │
                        └──────────────────┘
 ```
+
+## Recent Updates (Official Package Integration)
+
+### Frontend Implementation Updated
+- **Package**: Now uses `indexedcp` v1.0.0 dependency
+- **Protocol Compatibility**: Browser implementation follows official IndexedCP chunking protocol
+- **Consistency**: Same 1MB chunk size and upload headers as backend
+- **Authentication**: Supports API key authentication via headers
+- **Storage**: Uses IndexedDB for chunk management (browser-compatible)
+- **Non-Disruptive**: Maintains same API interface for existing code
+
+### Benefits Achieved
+✅ **Official Protocol**: Uses same chunking and upload approach as backend  
+✅ **Package Consistency**: Both frontend and backend depend on same indexedcp package  
+✅ **Browser Compatible**: No Node.js dependencies, pure browser implementation  
+✅ **Authentication**: Full API key support with Bearer token headers  
+✅ **Reliability**: IndexedDB-backed chunk storage with resumable uploads  
+✅ **Performance**: 1MB chunked uploads for efficient large file handling
 
 ## File Structure
 

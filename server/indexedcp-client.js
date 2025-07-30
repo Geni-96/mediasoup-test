@@ -12,16 +12,17 @@ let indexedCPClient = null;
  */
 async function initializeIndexedCP() {
   try {
-    // Initialize IndexedCP client
-    // Default configuration - can be overridden with environment variables
-    const config = {
-      server: process.env.INDEXEDCP_SERVER || 'http://localhost:8080',
-      apiKey: process.env.INDEXEDCP_API_KEY || '',
-      timeout: parseInt(process.env.INDEXEDCP_TIMEOUT) || 30000
-    };
+    // Initialize IndexedCP client (constructor takes no parameters)
+    indexedCPClient = new IndexedCPClient();
     
-    indexedCPClient = new IndexedCPClient(config);
+    // Configuration is handled via environment variables and API key setting
+    const apiKey = process.env.INDEXEDCP_API_KEY || '';
+    if (apiKey) {
+      indexedCPClient.apiKey = apiKey;
+    }
+    
     console.log('IndexedCP client initialized successfully');
+    console.log('IndexedCP server will be specified per upload operation');
     return true;
   } catch (error) {
     console.error('Failed to initialize IndexedCP client:', error.message);
