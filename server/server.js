@@ -25,6 +25,14 @@ console.log('Session ID:', sessionId); // Log the session ID for debugging
 const axios = require('axios');
 const FormData = require('form-data');
 
+// IndexedCP integration for separate audio and annotation uploads
+const { 
+  initializeIndexedCP, 
+  uploadAnnotationsToIndexedCP, 
+  uploadAudioToIndexedCP, 
+  uploadMetadataToIndexedCP 
+} = require('./indexedcp-client');
+
 app.use(express.static(path.join(__dirname, '../client/build')))
 // const io = require("socket.io")(server, {
 //   cors: {
@@ -217,7 +225,7 @@ async function writeSpeakerLogToFile(roomId, sessionId) {
   }
 
   try {
-    // Write room-based log
+    // Write room-based log (EXISTING FUNCTIONALITY - DO NOT MODIFY)
     const roomLogPath = path.join(logDir, `speaker-log-${roomId}.json`);
     fs.writeFileSync(roomLogPath, JSON.stringify(logData, null, 2));
     
@@ -227,6 +235,12 @@ async function writeSpeakerLogToFile(roomId, sessionId) {
     
     console.log(`Speaker logs written for room ${roomId} and session ${sessionId}`);
     console.log(`Total speaking events: ${timeline.length}`);
+    
+    // ADD: Upload annotations to IndexedCP (non-disruptive)
+    uploadAnnotationsToIndexedCP(roomId, sessionId, logData).catch(error => {
+      console.error('IndexedCP annotation upload failed, continuing normally:', error.message);
+    });
+    
   } catch (error) {
     console.error(`Error writing speaker log for room ${roomId}:`, error);
   }
@@ -667,6 +681,57 @@ io.on("connection", socket =>{
     botInfo?.get('plainTransport')?.close()
     io.to(roomId).emit("remove-all-videos")
   })
+
+  // NEW: Audio upload event for IndexedCP integration
+  socket.on('upload-mixed-audio', async ({ audioData, fileExtension, metadata }, callback) => {
+    try {
+      console.log(`Received mixed audio upload request for room ${roomId}, session ${sessionId}`);
+      
+      // Convert base64 audio data to buffer if needed
+      let audioBuffer;
+      if (typeof audioData === 'string') {
+        // Assume base64 encoded data
+        audioBuffer = Buffer.from(audioData, 'base64');
+      } else if (Buffer.isBuffer(audioData)) {
+        audioBuffer = audioData;
+      } else {
+        throw new Error('Invalid audio data format');
+      }
+      
+      // Upload to IndexedCP (non-disruptive)
+      const success = await uploadAudioToIndexedCP(roomId, sessionId, audioBuffer, fileExtension || 'webm');
+      
+      // Optionally upload metadata if provided
+      if (metadata && success) {
+        await uploadMetadataToIndexedCP(roomId, sessionId, {
+          ...metadata,
+          participantCount: Object.keys(consumerInfo.get(`${roomId}:${username}`)?.get('consumers') || {}).length,
+          uploadTimestamp: new Date().toISOString()
+        }).catch(error => {
+          console.error('Metadata upload failed:', error.message);
+        });
+      }
+      
+      // Always call callback with success status
+      if (callback) {
+        callback({ 
+          success: success, 
+          message: success ? 'Audio uploaded successfully' : 'Audio upload failed, but system continues normally' 
+        });
+      }
+      
+    } catch (error) {
+      console.error('Error handling audio upload:', error.message);
+      // Non-disruptive: always respond positively to client
+      if (callback) {
+        callback({ 
+          success: false, 
+          message: 'Audio upload failed, but system continues normally' 
+        });
+      }
+    }
+  });
+
   })
 })
 
@@ -725,6 +790,11 @@ function startServer(){
     // console.log('started server on port 5001')
   })
   connectRedis();
+  
+  // Initialize IndexedCP client (non-disruptive)
+  initializeIndexedCP().catch(error => {
+    console.error('IndexedCP initialization failed, continuing without it:', error.message);
+  });
 }
 
 async function stopServer() {
