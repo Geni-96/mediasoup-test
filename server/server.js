@@ -650,7 +650,7 @@ io.on("connection", socket =>{
     console.log('peer left:', uname, 'curuser', username)
     consumerInfo.get(`${roomId}:${username}`)?.get('consumers')?.get(uname)?.close()
     consumerInfo.get(`${roomId}:${username}`)?.get('consumers')?.delete(uname)
-    botInfo?.get('consumers')?.get(uname)?.close()
+    // botInfo?.get('consumers')?.get(uname)?.close()
   })
   
   socket.on("end-meeting",async()=>{
@@ -673,12 +673,12 @@ io.on("connection", socket =>{
       console.log(result, 'result of deleting room data from redis')
       
     }
-    const botConsumers = await botInfo?.get('consumers');
-    for (const [peer, consumer] of botConsumers.entries()) {
-      console.log('closing bot consumer for:', peer)
-      consumer.close();
-    }
-    botInfo?.get('plainTransport')?.close()
+    // const botConsumers = await botInfo?.get('consumers');
+    // for (const [peer, consumer] of botConsumers.entries()) {
+    //   console.log('closing bot consumer for:', peer)
+    //   consumer.close();
+    // }
+    // botInfo?.get('plainTransport')?.close()
     io.to(roomId).emit("remove-all-videos")
   })
 
