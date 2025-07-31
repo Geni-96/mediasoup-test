@@ -35,6 +35,7 @@ function App() {
   const [camIcon, setCamIcon] = useState("video-24.png")
   const [sessionId, setSessionId] = useState(null)
   const [isTranscribing, setIsTranscribing] = useState(false);
+  // const [isRecording, setIsRecording] = useState(false); // Tracked in MixerPanel
   const [params, setParams] = useState({
     video: {
       track: null,
@@ -179,6 +180,17 @@ function App() {
     setIsTranscribing(false);
   }
 
+  // Recording control handlers
+  const handleRecordingStart = () => {
+    console.log('Recording started');
+    // setIsRecording(true); // Recording state is managed by MixerPanel
+  };
+
+  const handleRecordingStop = () => {
+    console.log('Recording stopped');
+    // setIsRecording(false); // Recording state is managed by MixerPanel
+  };
+
   // start producing video and audio tracks when producerTransport is set and video track is available
   useEffect(() => {
     if (producerTransport.current?.id && params.video.track) {
@@ -193,6 +205,14 @@ function App() {
       console.error('Frontend IndexedCP initialization failed, continuing without it:', error.message);
     });
   }, []);
+
+  // Monitor for call end conditions that should stop recording
+  useEffect(() => {
+    // When meeting ends or no participants remain, this constitutes call end
+    if (meetingEnded || (videos.length === 0 && !isVisible)) {
+      console.log('Call ended detected - meetingEnded:', meetingEnded, 'participants:', videos.length, 'joinScreenVisible:', isVisible);
+    }
+  }, [meetingEnded, videos.length, isVisible]);
 
   useEffect(() => {
   socket.on("new-transport", async(user) => {
@@ -222,11 +242,27 @@ function App() {
     socket.emit('end-transcriptions')
   })
 
+  // Monitor socket disconnection for call end detection
+  socket.on('disconnect', (reason) => {
+    console.log('Socket disconnected:', reason);
+    if (!meetingEnded && reason !== 'io client disconnect') {
+      console.log('Unexpected disconnection detected - treating as call end');
+      setMeetingEnded(true);
+    }
+  });
+
+  socket.on('connect_error', (error) => {
+    console.error('Socket connection error:', error);
+    // Don't automatically end meeting on connection errors as they might be temporary
+  });
+
   return () => {
     socket.off('new-transport');
     socket.off('sessionId');
     socket.off('remove video');
     socket.off('remove-all-videos');
+    socket.off('disconnect');
+    socket.off('connect_error');
     socket.off('transcribe');
   };
 }, []);
@@ -539,6 +575,10 @@ useEffect(() => {
         });
       }
       stopTranscriptions(); // Cleanup mixer on meeting end
+      
+      // Note: Recording will be automatically stopped by the MixerPanel 
+      // when callEnded state changes, which happens in handleHangup and remove-all-videos
+      
       setTimeout(() => {
         socket.removeAllListeners();
         socket.disconnect()
@@ -791,6 +831,9 @@ const copyLink = async(e, type) => {
           isTranscribing={isTranscribing}
           roomId={roomId}
           sessionId={sessionId}
+          callEnded={meetingEnded}
+          onRecordingStart={handleRecordingStart}
+          onRecordingStop={handleRecordingStop}
         />
       </div>)
       }

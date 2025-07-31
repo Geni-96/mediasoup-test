@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
 import reportWebVitals from './reportWebVitals';
-import MixerPanel from './Mixer';
+// import MixerPanel from './Mixer'; // Not used in index.js
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
