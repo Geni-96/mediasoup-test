@@ -48,7 +48,7 @@ async function uploadAnnotationsToIndexedCP(roomId, sessionId, annotationData) {
 
   let tempFilePath = null;
   try {
-    const filename = `${roomId}-${sessionId}-annotations.json`;
+    const filename = `.../logs/speaker-log-${roomId}.json`;
     
     // Create temporary directory for IndexedCP uploads
     const tempDir = path.join(__dirname, '../temp-indexedcp');
@@ -63,7 +63,7 @@ async function uploadAnnotationsToIndexedCP(roomId, sessionId, annotationData) {
     console.log(`Uploading annotations to IndexedCP: ${filename}`);
     
     // Use bufferAndUpload method with the temporary file path
-    const serverUrl = process.env.INDEXEDCP_SERVER || 'http://localhost:8080';
+    const serverUrl = process.env.INDEXEDCP_SERVER || 'http://localhost:3000';
     await indexedCPClient.bufferAndUpload(tempFilePath, serverUrl);
     
     console.log(`Successfully uploaded annotations to IndexedCP: ${filename}`);
