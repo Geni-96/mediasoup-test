@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import { 
   uploadMixedAudioToIndexedCP, 
   isIndexedCPAvailable,
@@ -6,26 +6,22 @@ import {
   stopRealTimeAudioStreaming
 } from './indexedcp-client';
 
-export default function MixerPanel({
-  onStart,
-  onStop,
-  mixedAudioStream,
-  isTranscribing,
-  roomId,
-  sessionId,
+export const useAudioRecording = ({ 
+  mixedAudioStream, 
+  roomId, 
+  sessionId, 
   callEnded,
   onRecordingStart,
-  onRecordingStop,
-}) {
+  onRecordingStop 
+}) => {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
   const recordingStartTimeRef = useRef(null);
   const durationIntervalRef = useRef(null);
-  const streamControllerRef = useRef(null); // Track IndexedCP streaming
+  const streamControllerRef = useRef(null);
   const [isStreaming, setIsStreaming] = useState(false);
-  // const maxRecordingDurationRef = useRef(null); // Not currently used
 
   // Maximum recording duration (6 hours = 21600 seconds)
   const MAX_RECORDING_DURATION = 6 * 60 * 60;
@@ -117,22 +113,22 @@ export default function MixerPanel({
   const startStreaming = async () => {
     if (!mixedAudioStream) {
       console.warn("No mixed audio stream to stream.");
-      return;
+      return false;
     }
 
     if (isStreaming) {
       console.warn("Streaming is already in progress.");
-      return;
+      return false;
     }
 
     if (!roomId || !sessionId) {
       console.warn("Missing roomId or sessionId for streaming.");
-      return;
+      return false;
     }
 
     if (!isIndexedCPAvailable()) {
       console.warn("IndexedCP not available for streaming.");
-      return;
+      return false;
     }
 
     try {
@@ -152,11 +148,14 @@ export default function MixerPanel({
         streamControllerRef.current = streamController;
         setIsStreaming(true);
         console.log('✅ Real-time audio streaming started successfully');
+        return true;
       } else {
         console.warn('⚠️ Failed to start real-time audio streaming');
+        return false;
       }
     } catch (error) {
       console.error('Failed to start streaming:', error);
+      return false;
     }
   };
 
@@ -189,12 +188,12 @@ export default function MixerPanel({
   const startRecording = () => {
     if (!mixedAudioStream) {
       console.warn("No mixed audio stream to record.");
-      return;
+      return false;
     }
 
     if (isRecording) {
       console.warn("Recording is already in progress.");
-      return;
+      return false;
     }
 
     try {
@@ -230,12 +229,14 @@ export default function MixerPanel({
       
       console.log('Started recording mixed audio stream...');
       if (onRecordingStart) onRecordingStart();
+      return true;
 
     } catch (error) {
       console.error('Failed to start recording:', error);
       alert(`Failed to start recording: ${error.message}`);
       setIsRecording(false);
       if (onRecordingStop) onRecordingStop();
+      return false;
     }
   };
 
@@ -304,124 +305,36 @@ export default function MixerPanel({
     if (onRecordingStop) onRecordingStop();
   };
 
-  return (
-    <div className="p-4 bg-gray-100 rounded shadow-md">
-      <h2 className="text-xl font-semibold mb-4">🎛️ Audio Mixer Panel</h2>
+  // Combined toggle function for both transcription and recording
+  const toggleRecording = async () => {
+    if (isRecording) {
+      // Stop both recording and streaming
+      stopRecording();
+      if (isStreaming) {
+        await stopStreaming();
+      }
+      return false; // Now inactive
+    } else {
+      // Start both recording and streaming
+      const recordingStarted = startRecording();
+      
+      if (recordingStarted && isIndexedCPAvailable()) {
+        await startStreaming();
+      }
+      
+      return recordingStarted; // Return active state
+    }
+  };
 
-      <div className="space-x-2 mb-4">
-        <button
-          onClick={onStart}
-          className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
-        >
-          Start Transcription
-        </button>
-
-        <button
-          onClick={onStop}
-          className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
-        >
-          Stop Transcription
-        </button>
-      </div>
-
-      {/* Streaming Controls */}
-      <div className="space-x-2 mb-4">
-        <button
-          onClick={startStreaming}
-          disabled={isStreaming || !mixedAudioStream || !isIndexedCPAvailable()}
-          className={`px-4 py-2 rounded text-white ${
-            isStreaming || !mixedAudioStream || !isIndexedCPAvailable()
-              ? 'bg-gray-400 cursor-not-allowed' 
-              : 'bg-purple-500 hover:bg-purple-600'
-          }`}
-          title={!isIndexedCPAvailable() ? "IndexedCP not available" : ""}
-        >
-          {isStreaming ? "Streaming..." : "Start Streaming"}
-        </button>
-
-        <button
-          onClick={stopStreaming}
-          disabled={!isStreaming}
-          className={`px-4 py-2 rounded text-white ${
-            !isStreaming 
-              ? 'bg-gray-400 cursor-not-allowed' 
-              : 'bg-red-500 hover:bg-red-600'
-          }`}
-        >
-          Stop Streaming
-        </button>
-      </div>
-
-      {/* Recording Controls */}
-      <div className="space-x-2 mb-4">
-        <button
-          onClick={startRecording}
-          disabled={isRecording || !mixedAudioStream}
-          className={`px-4 py-2 rounded text-white ${
-            isRecording || !mixedAudioStream 
-              ? 'bg-gray-400 cursor-not-allowed' 
-              : 'bg-blue-500 hover:bg-blue-600'
-          }`}
-        >
-          {isRecording ? "Recording..." : "Start Recording"}
-        </button>
-
-        <button
-          onClick={stopRecording}
-          disabled={!isRecording}
-          className={`px-4 py-2 rounded text-white ${
-            !isRecording 
-              ? 'bg-gray-400 cursor-not-allowed' 
-              : 'bg-red-500 hover:bg-red-600'
-          }`}
-        >
-          Stop Recording
-        </button>
-      </div>
-
-      {isStreaming && (
-        <div className="mt-3 p-3 bg-purple-50 border border-purple-200 rounded">
-          <p className="text-purple-800 font-medium">🟣 Streaming audio to IndexedCP in real-time...</p>
-          <p className="text-purple-600 text-sm">Audio is being streamed directly to IndexedCP as it's generated</p>
-        </div>
-      )}
-
-      {isRecording && (
-        <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded">
-          <p className="text-blue-800 font-medium">🔴 Recording in progress...</p>
-          <p className="text-blue-600 text-sm">Duration: {formatDuration(recordingDuration)}</p>
-          <p className="text-blue-600 text-xs mt-1">
-            Recording will continue until call ends or manually stopped
-            {recordingDuration > MAX_RECORDING_DURATION * 0.9 && 
-              ` (Max: ${formatDuration(MAX_RECORDING_DURATION)})`
-            }
-          </p>
-          {recordingDuration > MAX_RECORDING_DURATION * 0.9 && (
-            <p className="text-orange-600 text-xs mt-1 font-medium">
-              ⚠️ Approaching maximum recording duration
-            </p>
-          )}
-        </div>
-      )}
-
-      {callEnded && (
-        <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded">
-          <p className="text-yellow-800 font-medium">📞 Call has ended</p>
-          <p className="text-yellow-600 text-sm">Any active recording or streaming has been automatically stopped</p>
-        </div>
-      )}
-
-      {!mixedAudioStream && (
-        <p className="mt-2 text-yellow-600 text-sm">⚠️ Start transcription first to enable recording and streaming</p>
-      )}
-
-      {isTranscribing && (
-        <p className="mt-2 text-green-600">✅ Transcription in progress...</p>
-      )}
-
-      {!isIndexedCPAvailable() && (
-        <p className="mt-2 text-orange-600 text-sm">⚠️ IndexedCP not available - streaming disabled</p>
-      )}
-    </div>
-  );
-}
+  return {
+    isRecording,
+    isStreaming,
+    recordingDuration,
+    formatDuration,
+    toggleRecording,
+    startRecording,
+    stopRecording,
+    startStreaming,
+    stopStreaming
+  };
+};
