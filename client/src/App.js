@@ -205,9 +205,10 @@ function App() {
     if (meetingEnded || (videos.length === 0 && !isVisible)) {
       console.log('Call ended detected - meetingEnded:', meetingEnded, 'participants:', videos.length, 'joinScreenVisible:', isVisible);
       
-      // Auto-stop recording when call ends
+      // Just reset UI state - the useAudioRecording hook will handle cleanup automatically
       if (isRecordingActive) {
-        handleTranscriptionRecordingToggle();
+        setIsRecordingActive(false);
+        setRecordIcon("record-24.svg");
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -577,11 +578,9 @@ useEffect(() => {
       }
       stopTranscriptions(); // Cleanup mixer on meeting end
       
-      // Reset recording state
-      if (isRecordingActive) {
-        setIsRecordingActive(false);
-        setRecordIcon("record-24.svg");
-      }
+      // Reset recording UI state - useAudioRecording hook handles its own cleanup
+      setIsRecordingActive(false);
+      setRecordIcon("record-24.svg");
       
       setTimeout(() => {
         socket.removeAllListeners();
