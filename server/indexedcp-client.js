@@ -1,33 +1,33 @@
-// IndexedCP client configuration and utilities
-const { client: IndexedCPClient } = require('indexedcp');
+// IndexedCP HTTP client configuration and utilities
+const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const FormData = require('form-data');
 require('dotenv').config();
 
-let indexedCPClient = null;
+let indexedCPServiceUrl = null;
 
 /**
- * Initialize IndexedCP client with configuration
+ * Initialize IndexedCP HTTP client with configuration
  * This function should be called at server startup
  */
 async function initializeIndexedCP() {
   try {
-    // Initialize IndexedCP client (constructor takes no parameters)
-    indexedCPClient = new IndexedCPClient();
+    // Set up IndexedCP service URL from environment variable
+    indexedCPServiceUrl = process.env.INDEXEDCP_SERVER || 'http://localhost:3000';
     
-    // Configuration is handled via environment variables and API key setting
-    const apiKey = process.env.INDEXEDCP_API_KEY || '';
-    if (apiKey) {
-      indexedCPClient.apiKey = apiKey;
-    }
+    // Test connection to IndexedCP service
+    const response = await axios.get(`${indexedCPServiceUrl}/health`, { 
+      timeout: 5000 
+    });
     
-    console.log('IndexedCP client initialized successfully');
-    console.log('IndexedCP server will be specified per upload operation');
+    console.log('IndexedCP service connection established:', indexedCPServiceUrl);
     return true;
   } catch (error) {
-    console.error('Failed to initialize IndexedCP client:', error.message);
-    // Non-disruptive: if IndexedCP fails to initialize, we continue without it
-    indexedCPClient = null;
+    console.warn('IndexedCP service not available:', error.message);
+    console.warn('Will continue without IndexedCP integration');
+    // Non-disruptive: if IndexedCP service is unavailable, we continue without it
+    indexedCPServiceUrl = null;
     return false;
   }
 }
@@ -40,15 +40,15 @@ async function initializeIndexedCP() {
  * @returns {Promise<boolean>} - Success status
  */
 async function uploadAnnotationsToIndexedCP(roomId, sessionId, annotationData) {
-  // If IndexedCP is not initialized, fail gracefully
-  if (!indexedCPClient) {
-    console.log('IndexedCP not initialized, skipping annotation upload');
+  // If IndexedCP service is not available, fail gracefully
+  if (!indexedCPServiceUrl) {
+    console.log('IndexedCP service not available, skipping annotation upload');
     return false;
   }
 
   let tempFilePath = null;
   try {
-    const filename = `.../logs/speaker-log-${roomId}.json`;
+    const filename = `speaker-log-${roomId}.json`;
     
     // Create temporary directory for IndexedCP uploads
     const tempDir = path.join(__dirname, '../temp-indexedcp');
@@ -62,14 +62,32 @@ async function uploadAnnotationsToIndexedCP(roomId, sessionId, annotationData) {
     
     console.log(`Uploading annotations to IndexedCP: ${filename}`);
     
-    // Use bufferAndUpload method with the temporary file path
-    const serverUrl = process.env.INDEXEDCP_SERVER || 'http://localhost:3000';
-    await indexedCPClient.bufferAndUpload(tempFilePath, serverUrl);
+    // Create form data for multipart upload
+    const formData = new FormData();
+    formData.append('file', fs.createReadStream(tempFilePath), {
+      filename: filename,
+      contentType: 'application/json'
+    });
+    formData.append('roomId', roomId);
+    formData.append('sessionId', sessionId);
+    formData.append('type', 'annotations');
     
-    console.log(`Successfully uploaded annotations to IndexedCP: ${filename}`);
+    // Send HTTP POST request to IndexedCP service
+    const response = await axios.post(`${indexedCPServiceUrl}/upload`, formData, {
+      headers: {
+        ...formData.getHeaders(),
+      },
+      timeout: 30000, // 30 second timeout
+      maxContentLength: 100 * 1024 * 1024, // 100MB limit
+    });
+    
+    console.log(`Successfully uploaded annotations to IndexedCP: ${filename}`, response.data);
     return true;
   } catch (error) {
     console.error('Failed to upload annotations to IndexedCP:', error.message);
+    if (error.response) {
+      console.error('IndexedCP service response:', error.response.status, error.response.data);
+    }
     // Non-disruptive: log error but don't throw
     return false;
   } finally {
@@ -93,9 +111,9 @@ async function uploadAnnotationsToIndexedCP(roomId, sessionId, annotationData) {
  * @returns {Promise<boolean>} - Success status
  */
 async function uploadAudioToIndexedCP(roomId, sessionId, audioBuffer, fileExtension = 'webm') {
-  // If IndexedCP is not initialized, fail gracefully
-  if (!indexedCPClient) {
-    console.log('IndexedCP not initialized, skipping audio upload');
+  // If IndexedCP service is not available, fail gracefully
+  if (!indexedCPServiceUrl) {
+    console.log('IndexedCP service not available, skipping audio upload');
     return false;
   }
 
@@ -115,14 +133,32 @@ async function uploadAudioToIndexedCP(roomId, sessionId, audioBuffer, fileExtens
     
     console.log(`Uploading audio to IndexedCP: ${filename}`);
     
-    // Use bufferAndUpload method with the temporary file path
-    const serverUrl = process.env.INDEXEDCP_SERVER || 'http://localhost:8080';
-    await indexedCPClient.bufferAndUpload(tempFilePath, serverUrl);
+    // Create form data for multipart upload
+    const formData = new FormData();
+    formData.append('file', fs.createReadStream(tempFilePath), {
+      filename: filename,
+      contentType: getContentType(fileExtension)
+    });
+    formData.append('roomId', roomId);
+    formData.append('sessionId', sessionId);
+    formData.append('type', 'audio');
     
-    console.log(`Successfully uploaded audio to IndexedCP: ${filename}`);
+    // Send HTTP POST request to IndexedCP service
+    const response = await axios.post(`${indexedCPServiceUrl}/upload`, formData, {
+      headers: {
+        ...formData.getHeaders(),
+      },
+      timeout: 60000, // 60 second timeout for audio files
+      maxContentLength: 500 * 1024 * 1024, // 500MB limit for audio
+    });
+    
+    console.log(`Successfully uploaded audio to IndexedCP: ${filename}`, response.data);
     return true;
   } catch (error) {
     console.error('Failed to upload audio to IndexedCP:', error.message);
+    if (error.response) {
+      console.error('IndexedCP service response:', error.response.status, error.response.data);
+    }
     // Non-disruptive: log error but don't throw
     return false;
   } finally {
@@ -145,9 +181,9 @@ async function uploadAudioToIndexedCP(roomId, sessionId, audioBuffer, fileExtens
  * @returns {Promise<boolean>} - Success status
  */
 async function uploadMetadataToIndexedCP(roomId, sessionId, metadata) {
-  // If IndexedCP is not initialized, fail gracefully
-  if (!indexedCPClient) {
-    console.log('IndexedCP not initialized, skipping metadata upload');
+  // If IndexedCP service is not available, fail gracefully
+  if (!indexedCPServiceUrl) {
+    console.log('IndexedCP service not available, skipping metadata upload');
     return false;
   }
 
@@ -167,14 +203,32 @@ async function uploadMetadataToIndexedCP(roomId, sessionId, metadata) {
     
     console.log(`Uploading metadata to IndexedCP: ${filename}`);
     
-    // Use bufferAndUpload method with the temporary file path
-    const serverUrl = process.env.INDEXEDCP_SERVER || 'http://localhost:8080';
-    await indexedCPClient.bufferAndUpload(tempFilePath, serverUrl);
+    // Create form data for multipart upload
+    const formData = new FormData();
+    formData.append('file', fs.createReadStream(tempFilePath), {
+      filename: filename,
+      contentType: 'application/json'
+    });
+    formData.append('roomId', roomId);
+    formData.append('sessionId', sessionId);
+    formData.append('type', 'metadata');
     
-    console.log(`Successfully uploaded metadata to IndexedCP: ${filename}`);
+    // Send HTTP POST request to IndexedCP service
+    const response = await axios.post(`${indexedCPServiceUrl}/upload`, formData, {
+      headers: {
+        ...formData.getHeaders(),
+      },
+      timeout: 30000, // 30 second timeout
+      maxContentLength: 10 * 1024 * 1024, // 10MB limit for metadata
+    });
+    
+    console.log(`Successfully uploaded metadata to IndexedCP: ${filename}`, response.data);
     return true;
   } catch (error) {
     console.error('Failed to upload metadata to IndexedCP:', error.message);
+    if (error.response) {
+      console.error('IndexedCP service response:', error.response.status, error.response.data);
+    }
     // Non-disruptive: log error but don't throw
     return false;
   } finally {
@@ -190,11 +244,27 @@ async function uploadMetadataToIndexedCP(roomId, sessionId, metadata) {
 }
 
 /**
- * Check if IndexedCP client is available
- * @returns {boolean} - Whether IndexedCP client is initialized
+ * Check if IndexedCP service is available
+ * @returns {boolean} - Whether IndexedCP service is available
  */
 function isIndexedCPAvailable() {
-  return indexedCPClient !== null;
+  return indexedCPServiceUrl !== null;
+}
+
+/**
+ * Helper function to determine content type based on file extension
+ * @param {string} extension - File extension
+ * @returns {string} - MIME type
+ */
+function getContentType(extension) {
+  const mimeTypes = {
+    'webm': 'audio/webm',
+    'wav': 'audio/wav',
+    'mp3': 'audio/mpeg',
+    'mp4': 'audio/mp4',
+    'json': 'application/json'
+  };
+  return mimeTypes[extension.toLowerCase()] || 'application/octet-stream';
 }
 
 module.exports = {
