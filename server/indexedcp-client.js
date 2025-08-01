@@ -16,10 +16,6 @@ async function initializeIndexedCP() {
     // Set up IndexedCP service URL from environment variable
     indexedCPServiceUrl = process.env.INDEXEDCP_SERVER || 'http://localhost:3000';
     
-    // Test connection to IndexedCP service
-    const response = await axios.get(`${indexedCPServiceUrl}/health`, { 
-      timeout: 5000 
-    });
     
     console.log('IndexedCP service connection established:', indexedCPServiceUrl);
     return true;
@@ -85,77 +81,6 @@ async function uploadAnnotationsToIndexedCP(roomId, sessionId, annotationData) {
     return true;
   } catch (error) {
     console.error('Failed to upload annotations to IndexedCP:', error.message);
-    if (error.response) {
-      console.error('IndexedCP service response:', error.response.status, error.response.data);
-    }
-    // Non-disruptive: log error but don't throw
-    return false;
-  } finally {
-    // Clean up temporary file
-    if (tempFilePath && fs.existsSync(tempFilePath)) {
-      try {
-        fs.unlinkSync(tempFilePath);
-      } catch (cleanupError) {
-        console.warn('Failed to cleanup temporary file:', tempFilePath, cleanupError.message);
-      }
-    }
-  }
-}
-
-/**
- * Upload audio file to IndexedCP
- * @param {string} roomId - The room identifier
- * @param {string} sessionId - The session identifier
- * @param {Buffer} audioBuffer - The audio file buffer
- * @param {string} fileExtension - The file extension (e.g., 'webm', 'wav')
- * @returns {Promise<boolean>} - Success status
- */
-async function uploadAudioToIndexedCP(roomId, sessionId, audioBuffer, fileExtension = 'webm') {
-  // If IndexedCP service is not available, fail gracefully
-  if (!indexedCPServiceUrl) {
-    console.log('IndexedCP service not available, skipping audio upload');
-    return false;
-  }
-
-  let tempFilePath = null;
-  try {
-    const filename = `${roomId}-${sessionId}-audio.${fileExtension}`;
-    
-    // Create temporary directory for IndexedCP uploads
-    const tempDir = path.join(__dirname, '../temp-indexedcp');
-    if (!fs.existsSync(tempDir)) {
-      fs.mkdirSync(tempDir, { recursive: true });
-    }
-    
-    // Write audio buffer to temporary file
-    tempFilePath = path.join(tempDir, filename);
-    fs.writeFileSync(tempFilePath, audioBuffer);
-    
-    console.log(`Uploading audio to IndexedCP: ${filename}`);
-    
-    // Create form data for multipart upload
-    const formData = new FormData();
-    formData.append('file', fs.createReadStream(tempFilePath), {
-      filename: filename,
-      contentType: getContentType(fileExtension)
-    });
-    formData.append('roomId', roomId);
-    formData.append('sessionId', sessionId);
-    formData.append('type', 'audio');
-    
-    // Send HTTP POST request to IndexedCP service
-    const response = await axios.post(`${indexedCPServiceUrl}/upload`, formData, {
-      headers: {
-        ...formData.getHeaders(),
-      },
-      timeout: 60000, // 60 second timeout for audio files
-      maxContentLength: 500 * 1024 * 1024, // 500MB limit for audio
-    });
-    
-    console.log(`Successfully uploaded audio to IndexedCP: ${filename}`, response.data);
-    return true;
-  } catch (error) {
-    console.error('Failed to upload audio to IndexedCP:', error.message);
     if (error.response) {
       console.error('IndexedCP service response:', error.response.status, error.response.data);
     }
@@ -270,7 +195,6 @@ function getContentType(extension) {
 module.exports = {
   initializeIndexedCP,
   uploadAnnotationsToIndexedCP,
-  uploadAudioToIndexedCP,
   uploadMetadataToIndexedCP,
   isIndexedCPAvailable
 };

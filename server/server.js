@@ -29,7 +29,6 @@ const FormData = require('form-data');
 const { 
   initializeIndexedCP, 
   uploadAnnotationsToIndexedCP, 
-  uploadAudioToIndexedCP, 
   uploadMetadataToIndexedCP 
 } = require('./indexedcp-client');
 
@@ -677,60 +676,8 @@ io.on("connection", socket =>{
     // for (const [peer, consumer] of botConsumers.entries()) {
     //   console.log('closing bot consumer for:', peer)
     //   consumer.close();
-    // }
-    // botInfo?.get('plainTransport')?.close()
     io.to(roomId).emit("remove-all-videos")
   })
-
-  // NEW: Audio upload event for IndexedCP integration
-  socket.on('upload-mixed-audio', async ({ audioData, fileExtension, metadata }, callback) => {
-    try {
-      console.log(`Received mixed audio upload request for room ${roomId}, session ${sessionId}`);
-      
-      // Convert base64 audio data to buffer if needed
-      let audioBuffer;
-      if (typeof audioData === 'string') {
-        // Assume base64 encoded data
-        audioBuffer = Buffer.from(audioData, 'base64');
-      } else if (Buffer.isBuffer(audioData)) {
-        audioBuffer = audioData;
-      } else {
-        throw new Error('Invalid audio data format');
-      }
-      
-      // Upload to IndexedCP (non-disruptive)
-      const success = await uploadAudioToIndexedCP(roomId, sessionId, audioBuffer, fileExtension || 'webm');
-      
-      // Optionally upload metadata if provided
-      if (metadata && success) {
-        await uploadMetadataToIndexedCP(roomId, sessionId, {
-          ...metadata,
-          participantCount: Object.keys(consumerInfo.get(`${roomId}:${username}`)?.get('consumers') || {}).length,
-          uploadTimestamp: new Date().toISOString()
-        }).catch(error => {
-          console.error('Metadata upload failed:', error.message);
-        });
-      }
-      
-      // Always call callback with success status
-      if (callback) {
-        callback({ 
-          success: success, 
-          message: success ? 'Audio uploaded successfully' : 'Audio upload failed, but system continues normally' 
-        });
-      }
-      
-    } catch (error) {
-      console.error('Error handling audio upload:', error.message);
-      // Non-disruptive: always respond positively to client
-      if (callback) {
-        callback({ 
-          success: false, 
-          message: 'Audio upload failed, but system continues normally' 
-        });
-      }
-    }
-  });
 
   })
 })

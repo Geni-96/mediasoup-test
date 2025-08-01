@@ -1,5 +1,10 @@
 import React, { useState, useRef, useEffect } from "react";
-import { uploadMixedAudioToIndexedCP, isIndexedCPAvailable } from './indexedcp-client';
+import { 
+  uploadMixedAudioToIndexedCP, 
+  isIndexedCPAvailable,
+  startRealTimeAudioStreaming,
+  stopRealTimeAudioStreaming
+} from './indexedcp-client';
 
 export default function MixerPanel({
   onStart,
@@ -18,19 +23,27 @@ export default function MixerPanel({
   const chunksRef = useRef([]);
   const recordingStartTimeRef = useRef(null);
   const durationIntervalRef = useRef(null);
+  const streamControllerRef = useRef(null); // Track IndexedCP streaming
+  const [isStreaming, setIsStreaming] = useState(false);
   // const maxRecordingDurationRef = useRef(null); // Not currently used
 
   // Maximum recording duration (6 hours = 21600 seconds)
   const MAX_RECORDING_DURATION = 6 * 60 * 60;
 
-  // Effect to handle call end during recording
+  // Effect to handle call end during recording or streaming
   useEffect(() => {
-    if (callEnded && isRecording) {
-      console.log('Call ended, stopping recording...');
-      stopRecording();
+    if (callEnded) {
+      if (isRecording) {
+        console.log('Call ended, stopping recording...');
+        stopRecording();
+      }
+      if (isStreaming) {
+        console.log('Call ended, stopping streaming...');
+        stopStreaming();
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [callEnded, isRecording]);
+  }, [callEnded, isRecording, isStreaming]);
 
   // Update recording duration every second
   useEffect(() => {
@@ -75,6 +88,14 @@ export default function MixerPanel({
           console.error('Error stopping recording on unmount:', e);
         }
       }
+      if (isStreaming && streamControllerRef.current) {
+        console.log('Component unmounting during streaming, stopping...');
+        try {
+          stopRealTimeAudioStreaming(streamControllerRef.current);
+        } catch (e) {
+          console.error('Error stopping streaming on unmount:', e);
+        }
+      }
       if (durationIntervalRef.current) {
         clearInterval(durationIntervalRef.current);
       }
@@ -91,6 +112,78 @@ export default function MixerPanel({
       return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     }
     return `${minutes}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const startStreaming = async () => {
+    if (!mixedAudioStream) {
+      console.warn("No mixed audio stream to stream.");
+      return;
+    }
+
+    if (isStreaming) {
+      console.warn("Streaming is already in progress.");
+      return;
+    }
+
+    if (!roomId || !sessionId) {
+      console.warn("Missing roomId or sessionId for streaming.");
+      return;
+    }
+
+    if (!isIndexedCPAvailable()) {
+      console.warn("IndexedCP not available for streaming.");
+      return;
+    }
+
+    try {
+      console.log('Starting real-time audio streaming to IndexedCP...');
+      
+      const streamController = await startRealTimeAudioStreaming(
+        mixedAudioStream, 
+        roomId, 
+        sessionId,
+        {
+          chunkDuration: 2000, // 2 second chunks
+          mimeType: 'audio/webm;codecs=opus'
+        }
+      );
+
+      if (streamController) {
+        streamControllerRef.current = streamController;
+        setIsStreaming(true);
+        console.log('✅ Real-time audio streaming started successfully');
+      } else {
+        console.warn('⚠️ Failed to start real-time audio streaming');
+      }
+    } catch (error) {
+      console.error('Failed to start streaming:', error);
+    }
+  };
+
+  const stopStreaming = async () => {
+    if (!isStreaming || !streamControllerRef.current) {
+      console.warn("No active streaming to stop.");
+      return;
+    }
+
+    try {
+      console.log('Stopping real-time audio streaming...');
+      const success = await stopRealTimeAudioStreaming(streamControllerRef.current);
+      
+      if (success) {
+        console.log('✅ Real-time audio streaming stopped successfully');
+      } else {
+        console.warn('⚠️ Issues stopping real-time audio streaming');
+      }
+      
+      streamControllerRef.current = null;
+      setIsStreaming(false);
+    } catch (error) {
+      console.error('Error stopping streaming:', error);
+      // Force cleanup even if error occurred
+      streamControllerRef.current = null;
+      setIsStreaming(false);
+    }
   };
 
   const startRecording = () => {
@@ -215,7 +308,7 @@ export default function MixerPanel({
     <div className="p-4 bg-gray-100 rounded shadow-md">
       <h2 className="text-xl font-semibold mb-4">🎛️ Audio Mixer Panel</h2>
 
-      <div className="space-x-2">
+      <div className="space-x-2 mb-4">
         <button
           onClick={onStart}
           className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
@@ -229,7 +322,38 @@ export default function MixerPanel({
         >
           Stop Transcription
         </button>
+      </div>
 
+      {/* Streaming Controls */}
+      <div className="space-x-2 mb-4">
+        <button
+          onClick={startStreaming}
+          disabled={isStreaming || !mixedAudioStream || !isIndexedCPAvailable()}
+          className={`px-4 py-2 rounded text-white ${
+            isStreaming || !mixedAudioStream || !isIndexedCPAvailable()
+              ? 'bg-gray-400 cursor-not-allowed' 
+              : 'bg-purple-500 hover:bg-purple-600'
+          }`}
+          title={!isIndexedCPAvailable() ? "IndexedCP not available" : ""}
+        >
+          {isStreaming ? "Streaming..." : "Start Streaming"}
+        </button>
+
+        <button
+          onClick={stopStreaming}
+          disabled={!isStreaming}
+          className={`px-4 py-2 rounded text-white ${
+            !isStreaming 
+              ? 'bg-gray-400 cursor-not-allowed' 
+              : 'bg-red-500 hover:bg-red-600'
+          }`}
+        >
+          Stop Streaming
+        </button>
+      </div>
+
+      {/* Recording Controls */}
+      <div className="space-x-2 mb-4">
         <button
           onClick={startRecording}
           disabled={isRecording || !mixedAudioStream}
@@ -255,6 +379,13 @@ export default function MixerPanel({
         </button>
       </div>
 
+      {isStreaming && (
+        <div className="mt-3 p-3 bg-purple-50 border border-purple-200 rounded">
+          <p className="text-purple-800 font-medium">🟣 Streaming audio to IndexedCP in real-time...</p>
+          <p className="text-purple-600 text-sm">Audio is being streamed directly to IndexedCP as it's generated</p>
+        </div>
+      )}
+
       {isRecording && (
         <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded">
           <p className="text-blue-800 font-medium">🔴 Recording in progress...</p>
@@ -276,16 +407,20 @@ export default function MixerPanel({
       {callEnded && (
         <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded">
           <p className="text-yellow-800 font-medium">📞 Call has ended</p>
-          <p className="text-yellow-600 text-sm">Any active recording has been automatically stopped and saved</p>
+          <p className="text-yellow-600 text-sm">Any active recording or streaming has been automatically stopped</p>
         </div>
       )}
 
       {!mixedAudioStream && (
-        <p className="mt-2 text-yellow-600 text-sm">⚠️ Start transcription first to enable recording</p>
+        <p className="mt-2 text-yellow-600 text-sm">⚠️ Start transcription first to enable recording and streaming</p>
       )}
 
       {isTranscribing && (
         <p className="mt-2 text-green-600">✅ Transcription in progress...</p>
+      )}
+
+      {!isIndexedCPAvailable() && (
+        <p className="mt-2 text-orange-600 text-sm">⚠️ IndexedCP not available - streaming disabled</p>
       )}
     </div>
   );

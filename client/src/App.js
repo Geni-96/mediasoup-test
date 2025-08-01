@@ -2,7 +2,7 @@ import { React, useState, useRef, useEffect } from 'react';
 import { io } from "socket.io-client";
 import { Device } from "mediasoup-client";
 import MixerPanel from './Mixer';
-import { initializeIndexedCP, uploadMixedAudioToIndexedCP, isIndexedCPAvailable } from './indexedcp-client';
+import { initializeIndexedCP, isIndexedCPAvailable } from './indexedcp-client';
 // const socket = io("http://localhost:5001", {
 //   transports: ["websocket", "polling"],
 //   withCredentials: true
@@ -136,38 +136,8 @@ function App() {
   function stopTranscriptions() {
     console.log('Stopping transcriptions');
     
-    // Auto-upload mixed audio when transcription stops (if available)
-    if (roomId && sessionId && mixedAudioStream && isIndexedCPAvailable()) {
-      console.log('Auto-uploading mixed audio to IndexedCP on transcription stop...');
-      
-      // Create a short recording of the current mixed stream
-      const recorder = new MediaRecorder(mixedAudioStream, {
-        mimeType: 'audio/webm;codecs=opus'
-      });
-      const chunks = [];
-      
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunks.push(e.data);
-      };
-      
-      recorder.onstop = async () => {
-        if (chunks.length > 0) {
-          const blob = new Blob(chunks, { type: "audio/webm" });
-          try {
-            const uploadSuccess = await uploadMixedAudioToIndexedCP(roomId, sessionId, blob, 'webm');
-            if (uploadSuccess) {
-              console.log('✅ Auto-uploaded mixed audio to IndexedCP on transcription stop');
-            }
-          } catch (error) {
-            console.error('Auto-upload error:', error.message);
-          }
-        }
-      };
-      
-      // Record for a short duration to capture final state
-      recorder.start();
-      setTimeout(() => recorder.stop(), 1000);
-    }
+    // Note: Audio streaming is now handled directly by MixerPanel component
+    // No need for backend communication for audio uploads
     
     Object.keys(audioSourcesRef.current).forEach(removeTrackFromMixer);
     audioSourcesRef.current = {};
