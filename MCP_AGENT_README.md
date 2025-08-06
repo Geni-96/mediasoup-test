@@ -1,14 +1,41 @@
 # MediaSoup MCP Agent Integration
 
-This integration allows LLM agents to participate in MediaSoup video conferencing rooms through the Model Context Protocol (MCP).
+This integration allows LLM agents to participate in MediaSoup video conferencing rooms through the Model Context Protocol (MCP) using HTTP transport.
 
 ## Features
 
+- **HTTP-based MCP Server**: Accessible via HTTP/SSE transport
 - **Agent Room Participation**: LLM agents can join and leave rooms
 - **Message Broadcasting**: Agents can send messages to room participants
 - **Room Information**: Agents can query room status and participant lists
 - **Real-time Updates**: Frontend displays agent presence and messages
 - **Unique Naming**: Automatic username conflict resolution
+- **Dual API Access**: Both native MCP protocol and HTTP REST endpoints
+
+## Architecture
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   MCP Client    │───▶│  MCP Server     │───▶│ MediaSoup HTTP  │
+│   (LLM Agent)   │    │  (HTTP/SSE)     │    │   API Endpoints │
+│                 │    │  Port 5002      │    │   Port 5001     │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+                                │                        │
+                       ┌─────────────────┐               │
+                       │  HTTP Wrapper   │               │
+                       │   REST API      │               │
+                       └─────────────────┘               │
+                                                        │
+                                               ┌─────────────────┐
+                                               │  Socket.IO      │
+                                               │  Broadcasting   │
+                                               └─────────────────┘
+                                                        │
+                                               ┌─────────────────┐
+                                               │   React         │
+                                               │   Frontend      │
+                                               └─────────────────┘
+```
 
 ## Setup
 
@@ -16,7 +43,7 @@ This integration allows LLM agents to participate in MediaSoup video conferencin
 
 ```bash
 cd server
-npm install @modelcontextprotocol/sdk
+npm install @modelcontextprotocol/sdk express cors
 ```
 
 ### 2. Start the MediaSoup Server
@@ -25,10 +52,30 @@ npm install @modelcontextprotocol/sdk
 npm start
 ```
 
-### 3. Configure MCP Client
+### 3. Start the MCP Server
 
-Add the MCP server configuration to your MCP client (e.g., Claude Desktop):
+```bash
+cd server
+npm run mcp-server
+# or
+node mcp-server.js
+```
 
+### 4. Configure MCP Client
+
+#### Option A: HTTP Transport (Recommended)
+```json
+{
+  "mcpServers": {
+    "mediasoup-agent": {
+      "transport": "sse",
+      "url": "http://localhost:5002/sse"
+    }
+  }
+}
+```
+
+#### Option B: Command Line (Legacy)
 ```json
 {
   "mcpServers": {
@@ -36,7 +83,8 @@ Add the MCP server configuration to your MCP client (e.g., Claude Desktop):
       "command": "node",
       "args": ["./server/mcp-server.js"],
       "env": {
-        "MEDIASOUP_SERVER_URL": "http://localhost:5001"
+        "MEDIASOUP_SERVER_URL": "http://localhost:5001",
+        "MCP_PORT": "5002"
       }
     }
   }
@@ -88,8 +136,22 @@ List all participants in a room.
 
 ## Testing
 
-### Test with the Sample Client
+### Start Both Servers
+```bash
+# Terminal 1: Start MediaSoup server
+npm start
 
+# Terminal 2: Start MCP server  
+cd server
+npm run mcp-server
+```
+
+### Test with Integration Suite
+```bash
+node test-integration.js
+```
+
+### Test with MCP Client
 ```bash
 cd server
 node test-mcp-client.js [roomId] [agentName]
@@ -100,20 +162,16 @@ Example:
 node test-mcp-client.js "my-test-room" "AssistantBot"
 ```
 
-### Manual Testing with curl
-
-Join a room:
+### Health Checks
 ```bash
-curl -X POST http://localhost:5001/api/agent/join \
-  -H "Content-Type: application/json" \
-  -d '{"username": "TestAgent", "roomId": "test-room", "agentType": "assistant"}'
-```
+# Check MediaSoup server
+curl http://localhost:5001/api/room/test
 
-Send a message:
-```bash
-curl -X POST http://localhost:5001/api/agent/message \
-  -H "Content-Type: application/json" \
-  -d '{"agentId": "agent_xxxxx", "roomId": "test-room", "message": "Hello from agent!"}'
+# Check MCP server
+curl http://localhost:5002/health
+
+# List MCP tools
+curl http://localhost:5002/api/tools
 ```
 
 ## Frontend Changes

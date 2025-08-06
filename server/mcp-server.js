@@ -11,7 +11,7 @@
  */
 
 const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
-const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
+const { SSEServerTransport } = require('@modelcontextprotocol/sdk/server/sse.js');
 const {
   CallToolRequestSchema,
   ErrorCode,
@@ -19,6 +19,8 @@ const {
   McpError,
 } = require('@modelcontextprotocol/sdk/types.js');
 const axios = require('axios');
+const express = require('express');
+const cors = require('cors');
 
 class MediaSoupMCPServer {
   constructor() {
@@ -35,7 +37,69 @@ class MediaSoupMCPServer {
     );
 
     this.baseUrl = process.env.MEDIASOUP_SERVER_URL || 'http://localhost:5001';
+    this.port = process.env.MCP_PORT || 5002;
+    this.app = express();
+    
+    this.setupExpress();
     this.setupToolHandlers();
+  }
+
+  setupExpress() {
+    this.app.use(cors());
+    this.app.use(express.json());
+    
+    // Health check endpoint
+    this.app.get('/health', (req, res) => {
+      res.json({ status: 'ok', service: 'mediasoup-mcp-server' });
+    });
+
+    // HTTP API wrapper for MCP tools
+    this.app.post('/api/tools/:toolName', async (req, res) => {
+      try {
+        const { toolName } = req.params;
+        const args = req.body;
+
+        let result;
+        switch (toolName) {
+          case 'join_room':
+            result = await this.joinRoom(args);
+            break;
+          case 'leave_room':
+            result = await this.leaveRoom(args);
+            break;
+          case 'send_message':
+            result = await this.sendMessage(args);
+            break;
+          case 'get_room_info':
+            result = await this.getRoomInfo(args);
+            break;
+          case 'list_participants':
+            result = await this.listParticipants(args);
+            break;
+          default:
+            return res.status(404).json({ error: `Unknown tool: ${toolName}` });
+        }
+
+        // Parse the JSON result from MCP format
+        const mcpResult = JSON.parse(result.content[0].text);
+        res.json(mcpResult);
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // List available tools
+    this.app.get('/api/tools', (req, res) => {
+      res.json({
+        tools: [
+          'join_room',
+          'leave_room', 
+          'send_message',
+          'get_room_info',
+          'list_participants'
+        ]
+      });
+    });
   }
 
   setupToolHandlers() {
@@ -400,12 +464,26 @@ class MediaSoupMCPServer {
   }
 
   async run() {
-    const transport = new StdioServerTransport();
+    const httpServer = this.app.listen(this.port, () => {
+      console.log(`MediaSoup MCP server running on http://localhost:${this.port}`);
+      console.log(`Health check: http://localhost:${this.port}/health`);
+      console.log(`MCP endpoint: http://localhost:${this.port}/sse`);
+    });
+
+    // Set up SSE transport for MCP
+    const transport = new SSEServerTransport('/sse', this.app);
     await this.server.connect(transport);
-    console.error('MediaSoup MCP server running on stdio');
+    
+    console.log('MCP server connected and ready for agent connections');
+    
+    return httpServer;
   }
 }
 
-// Start the server
-const server = new MediaSoupMCPServer();
-server.run().catch(console.error);
+// Start the server if run directly
+if (require.main === module) {
+  const server = new MediaSoupMCPServer();
+  server.run().catch(console.error);
+}
+
+module.exports = { MediaSoupMCPServer };

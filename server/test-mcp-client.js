@@ -10,27 +10,29 @@
  */
 
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
-const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
-const { spawn } = require('child_process');
+const { SSEClientTransport } = require('@modelcontextprotocol/sdk/client/sse.js');
+const axios = require('axios');
 
 class MediaSoupMCPClient {
   constructor() {
     this.client = null;
     this.agentId = null;
     this.currentRoom = null;
+    this.mcpServerUrl = process.env.MCP_SERVER_URL || 'http://localhost:5002';
   }
 
   async connect() {
-    // Start the MCP server
-    const serverProcess = spawn('node', ['./mcp-server.js'], {
-      stdio: ['pipe', 'pipe', 'inherit'],
-      cwd: __dirname
-    });
+    console.log(`Connecting to MCP server at ${this.mcpServerUrl}...`);
+    
+    // Check if MCP server is running
+    try {
+      await axios.get(`${this.mcpServerUrl}/health`);
+      console.log('MCP server is running');
+    } catch (error) {
+      throw new Error(`MCP server is not running at ${this.mcpServerUrl}. Please start it first.`);
+    }
 
-    const transport = new StdioClientTransport({
-      reader: serverProcess.stdout,
-      writer: serverProcess.stdin
-    });
+    const transport = new SSEClientTransport(`${this.mcpServerUrl}/sse`);
 
     this.client = new Client(
       {
@@ -43,7 +45,7 @@ class MediaSoupMCPClient {
     );
 
     await this.client.connect(transport);
-    console.log('Connected to MCP server');
+    console.log('Connected to MCP server via HTTP/SSE');
   }
 
   async listTools() {

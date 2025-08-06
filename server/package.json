@@ -5,6 +5,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "mcp-server": "node mcp-server.js",
+    "start-mcp": "node start-mcp-server.js",
     "test-agent": "node test-mcp-client.js"
   },
   "keywords": [],

@@ -4,8 +4,15 @@
       "command": "node",
       "args": ["./server/mcp-server.js"],
       "env": {
-        "MEDIASOUP_SERVER_URL": "http://localhost:5001"
+        "MEDIASOUP_SERVER_URL": "http://localhost:5001",
+        "MCP_PORT": "5002"
       }
+    }
+  },
+  "httpServers": {
+    "mediasoup-agent-http": {
+      "url": "http://localhost:5002/sse",
+      "description": "MediaSoup Agent MCP Server via HTTP"
     }
   }
 }
