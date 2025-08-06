@@ -37,6 +37,8 @@ function App() {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isRecordingActive, setIsRecordingActive] = useState(false); // Combined transcription + recording state
   const [recordIcon, setRecordIcon] = useState("record-24.svg")
+  const [agentMessages, setAgentMessages] = useState([]); // Store agent messages
+  const [agents, setAgents] = useState([]); // Store agent participants
   const [params, setParams] = useState({
     video: {
       track: null,
@@ -256,6 +258,46 @@ function App() {
     // Don't automatically end meeting on connection errors as they might be temporary
   });
 
+  // Agent-related socket events
+  socket.on('agent-joined', (agentData) => {
+    console.log('Agent joined:', agentData);
+    setAgents(prevAgents => [...prevAgents, agentData]);
+    // Add a system message about agent joining
+    setAgentMessages(prev => [...prev, {
+      id: Math.random().toString(36).substring(2, 15),
+      type: 'system',
+      message: `${agentData.username} (${agentData.agentType} agent) joined the room`,
+      timestamp: Date.now(),
+      isAgent: true
+    }]);
+  });
+
+  socket.on('agent-left', (agentData) => {
+    console.log('Agent left:', agentData);
+    setAgents(prevAgents => prevAgents.filter(agent => agent.agentId !== agentData.agentId));
+    // Add a system message about agent leaving
+    setAgentMessages(prev => [...prev, {
+      id: Math.random().toString(36).substring(2, 15),
+      type: 'system',
+      message: `${agentData.username} (${agentData.agentType} agent) left the room`,
+      timestamp: Date.now(),
+      isAgent: true
+    }]);
+  });
+
+  socket.on('agent-message', (messageData) => {
+    console.log('Agent message received:', messageData);
+    setAgentMessages(prev => [...prev, {
+      id: messageData.messageId,
+      type: messageData.messageType,
+      message: messageData.message,
+      username: messageData.username,
+      agentType: messageData.agentType,
+      timestamp: messageData.timestamp,
+      isAgent: true
+    }]);
+  });
+
   return () => {
     socket.off('new-transport');
     socket.off('sessionId');
@@ -264,6 +306,9 @@ function App() {
     socket.off('disconnect');
     socket.off('connect_error');
     socket.off('transcribe');
+    socket.off('agent-joined');
+    socket.off('agent-left');
+    socket.off('agent-message');
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, []);
@@ -731,6 +776,61 @@ const copyLink = async(e, type) => {
           </div>
         ))}
         </div>
+        
+        {/* Agent Panel - Show when not on join screen and there are agents or messages */}
+        {!isVisible && (agents.length > 0 || agentMessages.length > 0) && (
+          <div className="mx-10 my-4">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 max-h-64 overflow-y-auto">
+              <h3 className="text-lg font-semibold mb-3 text-gray-800 dark:text-white">
+                AI Assistants ({agents.length})
+              </h3>
+              
+              {/* Active Agents */}
+              {agents.length > 0 && (
+                <div className="mb-4">
+                  <h4 className="text-sm font-medium text-gray-600 dark:text-gray-300 mb-2">Active Agents:</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {agents.map((agent) => (
+                      <span
+                        key={agent.agentId}
+                        className="px-3 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded-full text-sm"
+                      >
+                        {agent.username} ({agent.agentType})
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Agent Messages */}
+              {agentMessages.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-medium text-gray-600 dark:text-gray-300 mb-2">Recent Messages:</h4>
+                  <div className="space-y-2 max-h-32 overflow-y-auto">
+                    {agentMessages.slice(-5).map((msg) => (
+                      <div
+                        key={msg.id}
+                        className={`p-2 rounded text-sm ${
+                          msg.type === 'system'
+                            ? 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 italic'
+                            : 'bg-blue-50 dark:bg-blue-900 text-blue-800 dark:text-blue-200'
+                        }`}
+                      >
+                        {msg.type !== 'system' && (
+                          <span className="font-medium">{msg.username}: </span>
+                        )}
+                        {msg.message}
+                        <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">
+                          {new Date(msg.timestamp).toLocaleTimeString()}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         
         {isVisible ? null : 
           <div className="button-container">

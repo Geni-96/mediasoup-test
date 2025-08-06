@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "mediasoup-agent": {
+      "command": "node",
+      "args": ["./server/mcp-server.js"],
+      "env": {
+        "MEDIASOUP_SERVER_URL": "http://localhost:5001"
+      }
+    }
+  }
+}

@@ -33,6 +33,7 @@ const {
 } = require('./indexedcp-client');
 
 app.use(express.static(path.join(__dirname, '../client/build')))
+app.use(express.json());
 // const io = require("socket.io")(server, {
 //   cors: {
 //     origin: "http://localhost:3000",
@@ -87,6 +88,7 @@ let room;
 const paramlist = []
 let producerInfo = new Map();
 let consumerInfo = new Map();
+let agentInfo = new Map(); // Store agent information: agentId -> { username, roomId, agentType, joinTime }
 let botInfo = new Map()
 let username;
 
@@ -272,6 +274,276 @@ function cleanupSpeakerDiarization(roomId) {
 
   console.log(`Cleaned up speaker diarization for room: ${roomId}`);
 }
+
+// =============================================================================
+// HTTP API ENDPOINTS FOR LLM AGENT INTEGRATION
+// =============================================================================
+
+// Helper function to generate unique agent ID
+function generateAgentId() {
+  return 'agent_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+}
+
+// Helper function to make username unique in room
+async function makeUsernameUniqueInRoom(username, roomId) {
+  const roomData = await client.get(`room:${roomId}`);
+  if (!roomData) {
+    return username;
+  }
+  
+  const room = JSON.parse(roomData);
+  let uniqueUsername = username;
+  let counter = 1;
+  
+  while (room.peers.includes(uniqueUsername)) {
+    uniqueUsername = `${username}-${counter}`;
+    counter++;
+  }
+  
+  return uniqueUsername;
+}
+
+// Agent joins a room
+app.post('/api/agent/join', async (req, res) => {
+  try {
+    const { username, roomId, agentType = 'assistant' } = req.body;
+    
+    if (!username || !roomId) {
+      return res.status(400).json({ error: 'Username and roomId are required' });
+    }
+
+    // Check if room exists
+    const roomExists = await client.exists(`room:${roomId}`);
+    if (!roomExists) {
+      return res.status(404).json({ error: `Room ${roomId} does not exist` });
+    }
+
+    // Generate unique agent ID
+    const agentId = generateAgentId();
+    
+    // Make username unique in the room
+    const uniqueUsername = await makeUsernameUniqueInRoom(username, roomId);
+
+    // Add agent to room
+    const roomData = await client.get(`room:${roomId}`);
+    const room = JSON.parse(roomData);
+    room.peers.push(uniqueUsername);
+    await client.set(`room:${roomId}`, JSON.stringify(room));
+
+    // Store agent information
+    agentInfo.set(agentId, {
+      username: uniqueUsername,
+      roomId,
+      agentType,
+      joinTime: Date.now(),
+      isAgent: true
+    });
+
+    // Notify room participants about new agent
+    io.to(roomId).emit('agent-joined', {
+      agentId,
+      username: uniqueUsername,
+      agentType,
+      joinTime: Date.now()
+    });
+
+    console.log(`Agent ${uniqueUsername} (${agentId}) joined room ${roomId}`);
+
+    res.json({
+      success: true,
+      agentId,
+      username: uniqueUsername,
+      roomId,
+      agentType
+    });
+  } catch (error) {
+    console.error('Error in agent join:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Agent leaves a room
+app.post('/api/agent/leave', async (req, res) => {
+  try {
+    const { agentId, roomId } = req.body;
+    
+    if (!agentId || !roomId) {
+      return res.status(400).json({ error: 'AgentId and roomId are required' });
+    }
+
+    // Check if agent exists
+    const agent = agentInfo.get(agentId);
+    if (!agent) {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+
+    if (agent.roomId !== roomId) {
+      return res.status(400).json({ error: 'Agent is not in the specified room' });
+    }
+
+    // Remove agent from room
+    const roomData = await client.get(`room:${roomId}`);
+    if (roomData) {
+      const room = JSON.parse(roomData);
+      room.peers = room.peers.filter(peer => peer !== agent.username);
+      await client.set(`room:${roomId}`, JSON.stringify(room));
+    }
+
+    // Notify room participants about agent leaving
+    io.to(roomId).emit('agent-left', {
+      agentId,
+      username: agent.username,
+      agentType: agent.agentType
+    });
+
+    // Remove agent information
+    agentInfo.delete(agentId);
+
+    console.log(`Agent ${agent.username} (${agentId}) left room ${roomId}`);
+
+    res.json({
+      success: true,
+      message: `Agent left room ${roomId}`
+    });
+  } catch (error) {
+    console.error('Error in agent leave:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Agent sends a message to room
+app.post('/api/agent/message', async (req, res) => {
+  try {
+    const { agentId, roomId, message, messageType = 'chat' } = req.body;
+    
+    if (!agentId || !roomId || !message) {
+      return res.status(400).json({ error: 'AgentId, roomId, and message are required' });
+    }
+
+    // Check if agent exists and is in the room
+    const agent = agentInfo.get(agentId);
+    if (!agent) {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+
+    if (agent.roomId !== roomId) {
+      return res.status(400).json({ error: 'Agent is not in the specified room' });
+    }
+
+    const messageId = Math.random().toString(36).substring(2, 15);
+    const messageData = {
+      messageId,
+      agentId,
+      username: agent.username,
+      agentType: agent.agentType,
+      message,
+      messageType,
+      timestamp: Date.now(),
+      isAgent: true
+    };
+
+    // Send message to all participants in the room
+    io.to(roomId).emit('agent-message', messageData);
+
+    console.log(`Agent ${agent.username} sent message to room ${roomId}: ${message}`);
+
+    res.json({
+      success: true,
+      messageId,
+      message: 'Message sent successfully'
+    });
+  } catch (error) {
+    console.error('Error in agent message:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get room information
+app.get('/api/room/:roomId', async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    
+    const roomExists = await client.exists(`room:${roomId}`);
+    if (!roomExists) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+
+    const roomData = await client.get(`room:${roomId}`);
+    const room = JSON.parse(roomData);
+
+    // Get agent information for this room
+    const roomAgents = Array.from(agentInfo.entries())
+      .filter(([_, agent]) => agent.roomId === roomId)
+      .map(([agentId, agent]) => ({
+        agentId,
+        username: agent.username,
+        agentType: agent.agentType,
+        joinTime: agent.joinTime
+      }));
+
+    res.json({
+      roomId,
+      participants: room.peers,
+      agents: roomAgents,
+      totalParticipants: room.peers.length,
+      createdAt: room.createdAt || null
+    });
+  } catch (error) {
+    console.error('Error getting room info:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// List participants in a room
+app.get('/api/room/:roomId/participants', async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    
+    const roomExists = await client.exists(`room:${roomId}`);
+    if (!roomExists) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+
+    const roomData = await client.get(`room:${roomId}`);
+    const room = JSON.parse(roomData);
+
+    // Separate human participants and agents
+    const agents = Array.from(agentInfo.entries())
+      .filter(([_, agent]) => agent.roomId === roomId)
+      .map(([agentId, agent]) => ({
+        agentId,
+        username: agent.username,
+        agentType: agent.agentType,
+        joinTime: agent.joinTime,
+        isAgent: true
+      }));
+
+    const agentUsernames = agents.map(agent => agent.username);
+    const humanParticipants = room.peers
+      .filter(peer => !agentUsernames.includes(peer))
+      .map(username => ({
+        username,
+        isAgent: false
+      }));
+
+    const allParticipants = [...humanParticipants, ...agents];
+
+    res.json({
+      participants: allParticipants,
+      count: allParticipants.length,
+      humanCount: humanParticipants.length,
+      agentCount: agents.length
+    });
+  } catch (error) {
+    console.error('Error listing participants:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// =============================================================================
+// END HTTP API ENDPOINTS
+// =============================================================================
+
 io.on("connection", socket =>{
 
   // console.log('new peer connected', socket.id)

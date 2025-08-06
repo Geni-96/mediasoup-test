@@ -9,7 +9,8 @@
   "scripts": {
     "install": "cd client && npm install && cd ../server && npm install",
     "start": "node bin/start.js",
-    "test": "jest"
+    "test": "jest",
+    "test:mcp": "jest tests/mcp-agent.test.js"
   },
   "files": [
     "bin",
@@ -39,6 +40,6 @@
   "devDependencies": {
     "jest": "^29.7.0",
     "socket.io-client": "^4.8.1",
-    "supertest": "^7.1.0"
+    "supertest": "^7.1.4"
   }
 }
