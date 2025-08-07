@@ -470,9 +470,33 @@ class MediaSoupMCPServer {
       console.log(`MCP endpoint: http://localhost:${this.port}/sse`);
     });
 
-    // Set up SSE transport for MCP
-    const transport = new SSEServerTransport('/sse', this.app);
-    await this.server.connect(transport);
+    // Set up SSE endpoint manually using Express
+    this.app.get('/sse', (req, res) => {
+      // Set SSE headers
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Cache-Control'
+      });
+
+      // Create SSE transport with the response object
+      const transport = new SSEServerTransport(req, res);
+      
+      // Connect the MCP server to this transport
+      this.server.connect(transport).then(() => {
+        console.log('MCP client connected via SSE');
+      }).catch(error => {
+        console.error('Error connecting MCP client:', error);
+        res.end();
+      });
+
+      // Handle client disconnect
+      req.on('close', () => {
+        console.log('MCP client disconnected');
+      });
+    });
     
     console.log('MCP server connected and ready for agent connections');
     
