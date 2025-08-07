@@ -2,7 +2,7 @@
   "mcpServers": {
     "mediasoup-agent": {
       "command": "node",
-      "args": ["./server/mcp-server.js"],
+      "args": ["./server/mcp-http-server.js"],
       "env": {
         "MEDIASOUP_SERVER_URL": "http://localhost:5001",
         "MCP_PORT": "5002"
@@ -11,7 +11,7 @@
   },
   "httpServers": {
     "mediasoup-agent-http": {
-      "url": "http://localhost:5002/sse",
+      "url": "http://localhost:5002/mcp",
       "description": "MediaSoup Agent MCP Server via HTTP"
     }
   }

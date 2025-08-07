@@ -470,35 +470,133 @@ class MediaSoupMCPServer {
       console.log(`MCP endpoint: http://localhost:${this.port}/sse`);
     });
 
-    // Set up SSE endpoint manually using Express
-    this.app.get('/sse', (req, res) => {
-      // Set SSE headers
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Cache-Control'
-      });
+    // Set up SSE endpoint for MCP
+    this.app.all('/sse', async (req, res) => {
+      try {
+        console.log('MCP client connecting via SSE...');
+        
+        // Set up SSE headers
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization, Accept',
+        });
 
-      // Create SSE transport with the response object
-      const transport = new SSEServerTransport(req, res);
-      
-      // Connect the MCP server to this transport
-      this.server.connect(transport).then(() => {
-        console.log('MCP client connected via SSE');
-      }).catch(error => {
-        console.error('Error connecting MCP client:', error);
-        res.end();
-      });
+        // Handle preflight requests
+        if (req.method === 'OPTIONS') {
+          res.end();
+          return;
+        }
 
-      // Handle client disconnect
-      req.on('close', () => {
-        console.log('MCP client disconnected');
-      });
+        // Create a simple transport that works with the MCP client
+        const transport = {
+          start: () => {
+            console.log('SSE transport started');
+          },
+          send: (message) => {
+            const data = JSON.stringify(message);
+            res.write(`data: ${data}\n\n`);
+          },
+          close: () => {
+            res.end();
+          }
+        };
+
+        // Handle the MCP handshake manually
+        if (req.method === 'POST') {
+          let body = '';
+          req.on('data', chunk => {
+            body += chunk.toString();
+          });
+          
+          req.on('end', async () => {
+            try {
+              const message = JSON.parse(body);
+              console.log('Received MCP message:', message.method);
+              
+              // Handle initialize request
+              if (message.method === 'initialize') {
+                const response = {
+                  jsonrpc: '2.0',
+                  id: message.id,
+                  result: {
+                    protocolVersion: '2024-11-05',
+                    capabilities: {
+                      tools: {}
+                    },
+                    serverInfo: {
+                      name: 'mediasoup-agent-server',
+                      version: '1.0.0'
+                    }
+                  }
+                };
+                transport.send(response);
+              }
+              
+              // Handle tools/list request
+              else if (message.method === 'tools/list') {
+                const toolsResponse = await this.server.request({
+                  method: 'tools/list'
+                }, ListToolsRequestSchema);
+                
+                const response = {
+                  jsonrpc: '2.0',
+                  id: message.id,
+                  result: toolsResponse
+                };
+                transport.send(response);
+              }
+              
+              // Handle tools/call request
+              else if (message.method === 'tools/call') {
+                const callResponse = await this.server.request(message.params, CallToolRequestSchema);
+                
+                const response = {
+                  jsonrpc: '2.0',
+                  id: message.id,
+                  result: callResponse
+                };
+                transport.send(response);
+              }
+              
+              // Handle notifications
+              else if (message.method === 'notifications/initialized') {
+                console.log('MCP client initialized');
+              }
+              
+            } catch (error) {
+              console.error('Error handling MCP message:', error);
+              const errorResponse = {
+                jsonrpc: '2.0',
+                id: message.id || null,
+                error: {
+                  code: -32603,
+                  message: error.message
+                }
+              };
+              transport.send(errorResponse);
+            }
+          });
+        } else {
+          // For GET requests, just keep the connection open
+          res.write('data: {"type":"connection_established"}\n\n');
+        }
+
+        // Handle client disconnect
+        req.on('close', () => {
+          console.log('MCP client disconnected');
+        });
+
+      } catch (error) {
+        console.error('Error in SSE endpoint:', error);
+        res.status(500).json({ error: error.message });
+      }
     });
     
-    console.log('MCP server connected and ready for agent connections');
+    console.log('MCP server ready for agent connections');
     
     return httpServer;
   }
