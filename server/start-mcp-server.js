@@ -2,19 +2,19 @@
 
 /**
  * Start the MediaSoup MCP Server
- * This script starts the MCP server on HTTP with SSE transport
+ * This script starts the MCP server on HTTP transport
  */
 
-const { MediaSoupMCPServer } = require('./mcp-server');
+const { MediaSoupMCPHttpServer } = require('./mcp-http-server');
 
 async function startMCPServer() {
-  console.log('🚀 Starting MediaSoup MCP Server...');
+  console.log('🚀 Starting MediaSoup MCP HTTP Server...');
   
-  const server = new MediaSoupMCPServer();
+  const server = new MediaSoupMCPHttpServer();
   
   try {
     await server.run();
-    console.log('✅ MCP Server started successfully');
+    console.log('✅ MCP HTTP Server started successfully');
     
     // Handle graceful shutdown
     process.on('SIGINT', () => {

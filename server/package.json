@@ -4,8 +4,8 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "mcp-server": "node mcp-server.js",
-    "start-mcp": "node start-mcp-server.js",
+    "mcp-server": "node mcp-http-server.js",
+    "start-mcp": "node mcp-http-server.js",
     "test-agent": "node test-mcp-client.js"
   },
   "keywords": [],

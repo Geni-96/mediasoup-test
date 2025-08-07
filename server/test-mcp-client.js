@@ -1,279 +1,122 @@
 #!/usr/bin/env node
 
 /**
- * Simple MCP Client for Testing Agent Room Participation
- * 
- * This script demonstrates how to use the MCP tools to:
- * - Join a room as an agent
- * - Send messages to participants
- * - Leave the room
+ * Simple HTTP-based MCP Client for Testing Agent Room Participation
  */
 
-const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
-const { SSEClientTransport } = require('@modelcontextprotocol/sdk/client/sse.js');
 const axios = require('axios');
 
 class MediaSoupMCPClient {
   constructor() {
-    this.client = null;
-    this.agentId = null;
+    this.mcpServerUrl = 'http://localhost:5002';
+    this.sessionId = null;
     this.currentRoom = null;
-    this.mcpServerUrl = process.env.MCP_SERVER_URL || 'http://localhost:5002';
   }
 
   async connect() {
-    console.log(`Connecting to MCP server at ${this.mcpServerUrl}...`);
-    
-    // Check if MCP server is running
     try {
-      await axios.get(`${this.mcpServerUrl}/health`);
-      console.log('MCP server is running');
+      console.log('Initializing MCP HTTP client...');
+      
+      const initResponse = await axios.post(`${this.mcpServerUrl}/mcp`, {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: {
+            name: 'test-client',
+            version: '1.0.0'
+          }
+        }
+      });
+
+      this.sessionId = initResponse.headers['x-session-id'];
+      console.log('Connected to MCP server via HTTP');
+      
+      return true;
     } catch (error) {
-      throw new Error(`MCP server is not running at ${this.mcpServerUrl}. Please start it first.`);
+      console.error('Failed to connect:', error.message);
+      return false;
     }
-
-    const transport = new SSEClientTransport(`${this.mcpServerUrl}/sse`);
-
-    this.client = new Client(
-      {
-        name: 'mediasoup-test-client',
-        version: '1.0.0'
-      },
-      {
-        capabilities: {}
-      }
-    );
-
-    await this.client.connect(transport);
-    console.log('Connected to MCP server via HTTP/SSE');
   }
 
   async listTools() {
-    const response = await this.client.request(
-      { method: 'tools/list' },
-      { method: 'tools/list' }
-    );
-    console.log('Available tools:', response.tools.map(t => t.name));
-    return response.tools;
+    const response = await axios.post(`${this.mcpServerUrl}/mcp`, {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/list',
+      params: {}
+    }, {
+      headers: this.sessionId ? { 'X-Session-Id': this.sessionId } : {}
+    });
+    
+    console.log('Available tools:', response.data.result.tools.map(t => t.name));
+    return response.data.result.tools;
   }
 
-  async joinRoom(username, roomId, agentType = 'assistant') {
+  async joinRoom(agentName, roomId) {
     try {
-      const response = await this.client.request(
-        {
-          method: 'tools/call',
-          params: {
-            name: 'join_room',
-            arguments: {
-              username,
-              roomId,
-              agentType
-            }
+      const response = await axios.post(`${this.mcpServerUrl}/mcp`, {
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/call',
+        params: {
+          name: 'join_room',
+          arguments: {
+            agentName,
+            roomId
           }
         }
-      );
+      }, {
+        headers: this.sessionId ? { 'X-Session-Id': this.sessionId } : {}
+      });
 
-      const result = JSON.parse(response.content[0].text);
+      const result = JSON.parse(response.data.result.content[0].text);
       if (result.success) {
-        this.agentId = result.agentId;
-        this.currentRoom = result.roomId;
-        console.log(`✅ Successfully joined room ${roomId} as ${result.actualUsername}`);
-        console.log(`   Agent ID: ${this.agentId}`);
+        this.currentRoom = roomId;
+        console.log(`Successfully joined room ${roomId} as ${agentName}`);
         return result;
       } else {
-        console.error(`❌ Failed to join room: ${result.error}`);
+        console.error(`Failed to join room: ${result.error}`);
         return null;
       }
     } catch (error) {
-      console.error('Error joining room:', error.message);
-      return null;
-    }
-  }
-
-  async sendMessage(message, messageType = 'chat') {
-    if (!this.agentId || !this.currentRoom) {
-      console.error('❌ Not connected to any room');
-      return null;
-    }
-
-    try {
-      const response = await this.client.request(
-        {
-          method: 'tools/call',
-          params: {
-            name: 'send_message',
-            arguments: {
-              agentId: this.agentId,
-              roomId: this.currentRoom,
-              message,
-              messageType
-            }
-          }
-        }
-      );
-
-      const result = JSON.parse(response.content[0].text);
-      if (result.success) {
-        console.log(`✅ Message sent: "${message}"`);
-        return result;
-      } else {
-        console.error(`❌ Failed to send message: ${result.error}`);
-        return null;
-      }
-    } catch (error) {
-      console.error('Error sending message:', error.message);
-      return null;
-    }
-  }
-
-  async getRoomInfo(roomId) {
-    try {
-      const response = await this.client.request(
-        {
-          method: 'tools/call',
-          params: {
-            name: 'get_room_info',
-            arguments: {
-              roomId: roomId || this.currentRoom
-            }
-          }
-        }
-      );
-
-      const result = JSON.parse(response.content[0].text);
-      if (result.success) {
-        console.log('📊 Room Info:', result.roomInfo);
-        return result.roomInfo;
-      } else {
-        console.error(`❌ Failed to get room info: ${result.error}`);
-        return null;
-      }
-    } catch (error) {
-      console.error('Error getting room info:', error.message);
-      return null;
-    }
-  }
-
-  async listParticipants(roomId) {
-    try {
-      const response = await this.client.request(
-        {
-          method: 'tools/call',
-          params: {
-            name: 'list_participants',
-            arguments: {
-              roomId: roomId || this.currentRoom
-            }
-          }
-        }
-      );
-
-      const result = JSON.parse(response.content[0].text);
-      if (result.success) {
-        console.log('👥 Participants:', result.participants);
-        console.log(`   Total: ${result.count} (${result.humanCount} humans, ${result.agentCount} agents)`);
-        return result;
-      } else {
-        console.error(`❌ Failed to list participants: ${result.error}`);
-        return null;
-      }
-    } catch (error) {
-      console.error('Error listing participants:', error.message);
-      return null;
-    }
-  }
-
-  async leaveRoom() {
-    if (!this.agentId || !this.currentRoom) {
-      console.error('❌ Not connected to any room');
-      return null;
-    }
-
-    try {
-      const response = await this.client.request(
-        {
-          method: 'tools/call',
-          params: {
-            name: 'leave_room',
-            arguments: {
-              agentId: this.agentId,
-              roomId: this.currentRoom
-            }
-          }
-        }
-      );
-
-      const result = JSON.parse(response.content[0].text);
-      if (result.success) {
-        console.log(`✅ Successfully left room ${this.currentRoom}`);
-        this.agentId = null;
-        this.currentRoom = null;
-        return result;
-      } else {
-        console.error(`❌ Failed to leave room: ${result.error}`);
-        return null;
-      }
-    } catch (error) {
-      console.error('Error leaving room:', error.message);
+      console.error('Error joining room:', error.response?.data || error.message);
       return null;
     }
   }
 }
 
-// Example usage
-async function runExample() {
+// Test scenario
+async function runTest() {
   const client = new MediaSoupMCPClient();
+  const testRoomId = 'test-room-' + Date.now();
   
   try {
-    await client.connect();
-    await client.listTools();
-
-    // Example workflow
-    const roomId = process.argv[2] || 'test-room-' + Math.random().toString(36).substring(2, 8);
-    const agentName = process.argv[3] || 'Assistant';
-
-    console.log(`\n🤖 Starting agent workflow for room: ${roomId}`);
-    
-    // Join room
-    const joinResult = await client.joinRoom(agentName, roomId, 'assistant');
-    if (!joinResult) {
-      console.log('❌ Failed to join room, exiting');
-      return;
+    console.log('=== MCP Agent Test Scenario ===');
+    const connected = await client.connect();
+    if (!connected) {
+      throw new Error('Failed to connect to MCP server');
     }
 
-    // Wait a bit
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    console.log('\n--- Available Tools ---');
+    await client.listTools();
 
-    // Get room info
-    await client.getRoomInfo();
-    await client.listParticipants();
+    console.log('\n--- Joining Room ---');
+    await client.joinRoom('Test Agent', testRoomId);
 
-    // Send some messages
-    await client.sendMessage('Hello everyone! I am an AI assistant here to help.');
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    await client.sendMessage('I can help with transcription, note-taking, and answering questions.', 'announcement');
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    console.log('\n=== Test Completed ===');
 
-    // Stay in room for a while
-    console.log('\n⏳ Staying in room for 30 seconds...');
-    console.log('   You can join the room at: http://localhost:3000?roomId=' + roomId);
-    await new Promise(resolve => setTimeout(resolve, 30000));
-
-    // Leave room
-    await client.leaveRoom();
-    
-    console.log('\n✨ Example completed');
   } catch (error) {
-    console.error('Example failed:', error);
-  } finally {
-    process.exit(0);
+    console.error('\n=== Test Failed ===');
+    console.error('Error:', error.message);
   }
 }
 
-// Run if called directly
+// Run the test if this script is executed directly
 if (require.main === module) {
-  runExample().catch(console.error);
+  runTest().catch(console.error);
 }
 
-module.exports = MediaSoupMCPClient;
+module.exports = { MediaSoupMCPClient };
