@@ -584,6 +584,78 @@ app.get('/api/room/:roomId/audio/:participantName', async (req, res) => {
   }
 });
 
+/**
+ * POST /api/room/:roomId/audio/:participantName/produce
+ * Accepts: { audioBuffer, rtpParameters } in the request body
+ * Publishes the audio buffer as a producer for the participant in the specified room
+ * Returns success/failure and relevant producer info
+ */
+app.post('/api/room/:roomId/audio/:participantName/produce', async (req, res) => {
+  try {
+    const { roomId, participantName } = req.params;
+    const { audioBuffer, rtpParameters } = req.body;
+    // Validate room
+    const roomExists = await client.exists(`room:${roomId}`);
+    if (!roomExists) {
+      return res.status(404).json({ success: false, error: 'Room not found' });
+    }
+    // Validate participant
+    const roomData = await client.get(`room:${roomId}`);
+    const room = JSON.parse(roomData);
+    if (!room.peers.includes(participantName)) {
+      return res.status(404).json({ success: false, error: 'Participant not found in room' });
+    }
+    // Validate audioBuffer
+    if (!audioBuffer || typeof audioBuffer !== 'string') {
+      return res.status(400).json({ success: false, error: 'audioBuffer (base64 string) is required' });
+    }
+    // Decode base64 audio buffer
+    let buffer;
+    try {
+      buffer = Buffer.from(audioBuffer, 'base64');
+    } catch (err) {
+      return res.status(400).json({ success: false, error: 'Invalid base64 audioBuffer' });
+    }
+    // Get router
+    const router = await getRouter(roomId);
+    if (!router) {
+      return res.status(500).json({ success: false, error: 'Router not found for room' });
+    }
+    // Create a PlainTransport for external audio
+    const plainTransport = await router.createPlainTransport({
+      listenIp: '127.0.0.1',
+      rtcpMux: true,
+      comedia: false
+    });
+    // Connect transport (simulate external source)
+    await plainTransport.connect({ ip: '127.0.0.1', port: 0 });
+    // Create producer for the participant
+    const producer = await plainTransport.produce({
+      kind: 'audio',
+      rtpParameters: rtpParameters || {},
+      appData: { participantName, external: true }
+    });
+    // Store producer info
+    if (!producerInfo.has(`${roomId}:${participantName}`)) {
+      producerInfo.set(`${roomId}:${participantName}`, new Map());
+    }
+    producerInfo.get(`${roomId}:${participantName}`).set('externalAudioProducer', producer);
+    // Optionally, add to observer for diarization
+    addProducerToObserver(roomId, producer);
+    // Return success and producer info
+    return res.json({
+      success: true,
+      producerId: producer.id,
+      kind: producer.kind,
+      rtpParameters: producer.rtpParameters,
+      message: `External audio published for ${participantName} in room ${roomId}`
+    });
+  } catch (error) {
+    console.error('Error in MCP audio produce endpoint:', error);
+    return res.status(500).json({ success: false, error: error.message || 'Internal server error' });
+  }
+});
+
 // =============================================================================
 // END HTTP API ENDPOINTS
 // =============================================================================
