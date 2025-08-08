@@ -213,6 +213,50 @@ class MediaSoupMCPHttpServer {
               },
               required: ['roomId']
             }
+          },
+          {
+            name: 'produce_audio_stream',
+            description: 'Expose an existing audio stream from a MediaSoup room participant for external consumption.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                roomId: {
+                  type: 'string',
+                  description: 'The ID of the room'
+                },
+                participantName: {
+                  type: 'string',
+                  description: 'The name of the participant whose audio stream to expose'
+                }
+              },
+              required: ['roomId', 'participantName']
+            }
+          },
+          {
+            name: 'consume_audio_stream',
+            description: 'Consume an external audio stream and publish it into a MediaSoup room for a specified participant.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                roomId: {
+                  type: 'string',
+                  description: 'The ID of the room'
+                },
+                participantName: {
+                  type: 'string',
+                  description: 'The name of the participant to publish audio for'
+                },
+                audioBuffer: {
+                  type: 'string',
+                  description: 'Base64-encoded audio buffer to publish'
+                },
+                rtpParameters: {
+                  type: 'object',
+                  description: 'Optional RTP parameters for the audio stream'
+                }
+              },
+              required: ['roomId', 'participantName', 'audioBuffer']
+            }
           }
         ]
       }
@@ -222,7 +266,6 @@ class MediaSoupMCPHttpServer {
   async handleToolCall(request) {
     try {
       const { name, arguments: args } = request.params;
-      
       let result;
       switch (name) {
         case 'join_room':
@@ -240,13 +283,15 @@ class MediaSoupMCPHttpServer {
         case 'list_participants':
           result = await this.listParticipants(args);
           break;
+        case 'produce_audio_stream':
+          result = await this.produceAudioStream(args);
+          break;
         case 'consume_audio_stream':
           result = await this.consumeAudioStream(args);
           break;
         default:
           throw new Error(`Unknown tool: ${name}`);
       }
-
       return {
         jsonrpc: '2.0',
         id: request.id,
@@ -264,15 +309,90 @@ class MediaSoupMCPHttpServer {
     }
   }
 
+  // Expose an existing audio stream from a MediaSoup room participant for external consumption
+  async produceAudioStream(args) {
+    try {
+      const { roomId, participantName } = args;
+      // Call MediaSoup backend to get the audio stream for the participant
+      const response = await axios.get(`${MEDIASOUP_SERVER_URL}/api/room/${roomId}/audio/${encodeURIComponent(participantName)}`);
+      if (response.status === 200 && response.data) {
+        return {
+          content: [
+            {
+              type: 'json',
+              data: response.data,
+              message: `Audio stream info for ${participantName} in room ${roomId}`
+            }
+          ]
+        };
+      } else {
+        throw new Error('Audio stream not found or unavailable');
+      }
+    } catch (error) {
+      const errorMessage = error.response?.data?.error || error.message;
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: errorMessage,
+              message: `Failed to produce audio stream: ${errorMessage}`
+            }, null, 2)
+          }
+        ],
+        isError: true
+      };
+    }
+  }
+
+  // Consume an external audio stream and publish it into a MediaSoup room for a specified participant
+  async consumeAudioStream(args) {
+    try {
+      const { roomId, participantName, audioBuffer, rtpParameters } = args;
+      // Call MediaSoup backend to produce audio for the participant
+      const response = await axios.post(`${MEDIASOUP_SERVER_URL}/api/room/${roomId}/audio/${encodeURIComponent(participantName)}/produce`, {
+        audioBuffer,
+        rtpParameters
+      });
+      if (response.status === 200 && response.data) {
+        return {
+          content: [
+            {
+              type: 'json',
+              data: response.data,
+              message: `Produced external audio for ${participantName} in room ${roomId}`
+            }
+          ]
+        };
+      } else {
+        throw new Error('Failed to produce audio stream');
+      }
+    } catch (error) {
+      const errorMessage = error.response?.data?.error || error.message;
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: errorMessage,
+              message: `Failed to consume audio stream: ${errorMessage}`
+            }, null, 2)
+          }
+        ],
+        isError: true
+      };
+    }
+  }
+
   async joinRoom(args) {
     try {
       const { roomId, agentName = 'LLM Agent' } = args;
-      
       const response = await axios.post(`${MEDIASOUP_SERVER_URL}/api/agent/join`, {
         roomId,
         username: agentName
       });
-
       return {
         content: [
           {
@@ -305,12 +425,11 @@ class MediaSoupMCPHttpServer {
 
   async leaveRoom(args) {
     try {
-      const { roomId } = args;
-      
+      const { roomId, agentId } = args;
       const response = await axios.post(`${MEDIASOUP_SERVER_URL}/api/agent/leave`, {
-        roomId
+        roomId,
+        agentId
       });
-
       return {
         content: [
           {
@@ -343,13 +462,12 @@ class MediaSoupMCPHttpServer {
 
   async sendMessage(args) {
     try {
-      const { roomId, message } = args;
-      
+      const { roomId, message, agentId } = args;
       const response = await axios.post(`${MEDIASOUP_SERVER_URL}/api/agent/message`, {
         roomId,
-        message
+        message,
+        agentId
       });
-
       return {
         content: [
           {
@@ -383,9 +501,7 @@ class MediaSoupMCPHttpServer {
   async getRoomInfo(args) {
     try {
       const { roomId } = args;
-      
       const response = await axios.get(`${MEDIASOUP_SERVER_URL}/api/room/${roomId}`);
-
       return {
         content: [
           {
@@ -419,9 +535,7 @@ class MediaSoupMCPHttpServer {
   async listParticipants(args) {
     try {
       const { roomId } = args;
-      
       const response = await axios.get(`${MEDIASOUP_SERVER_URL}/api/room/${roomId}/participants`);
-
       return {
         content: [
           {
@@ -444,50 +558,6 @@ class MediaSoupMCPHttpServer {
               success: false,
               error: errorMessage,
               message: `Failed to list participants: ${errorMessage}`
-            }, null, 2)
-          }
-        ],
-        isError: true
-      };
-    }
-  }
-
-  // New tool: consume_audio_stream
-  async consumeAudioStream(args) {
-    try {
-      const { roomId, participantName } = args;
-      // Call MediaSoup backend to get the audio stream for the participant
-      // This is a stub; replace with actual MediaSoup integration
-      const response = await axios.get(`${MEDIASOUP_SERVER_URL}/api/room/${roomId}/audio/${encodeURIComponent(participantName)}`, {
-        responseType: 'arraybuffer'
-      });
-
-      if (response.status === 200 && response.data) {
-        // Return the audio buffer (as base64 for JSON transport)
-        const audioBase64 = Buffer.from(response.data).toString('base64');
-        return {
-          content: [
-            {
-              type: 'audio',
-              encoding: 'base64',
-              data: audioBase64,
-              message: `Audio stream for ${participantName} in room ${roomId}`
-            }
-          ]
-        };
-      } else {
-        throw new Error('Audio stream not found or unavailable');
-      }
-    } catch (error) {
-      const errorMessage = error.response?.data?.error || error.message;
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
-              success: false,
-              error: errorMessage,
-              message: `Failed to consume audio stream: ${errorMessage}`
             }, null, 2)
           }
         ],
