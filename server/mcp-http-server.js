@@ -240,6 +240,9 @@ class MediaSoupMCPHttpServer {
         case 'list_participants':
           result = await this.listParticipants(args);
           break;
+        case 'consume_audio_stream':
+          result = await this.consumeAudioStream(args);
+          break;
         default:
           throw new Error(`Unknown tool: ${name}`);
       }
@@ -441,6 +444,50 @@ class MediaSoupMCPHttpServer {
               success: false,
               error: errorMessage,
               message: `Failed to list participants: ${errorMessage}`
+            }, null, 2)
+          }
+        ],
+        isError: true
+      };
+    }
+  }
+
+  // New tool: consume_audio_stream
+  async consumeAudioStream(args) {
+    try {
+      const { roomId, participantName } = args;
+      // Call MediaSoup backend to get the audio stream for the participant
+      // This is a stub; replace with actual MediaSoup integration
+      const response = await axios.get(`${MEDIASOUP_SERVER_URL}/api/room/${roomId}/audio/${encodeURIComponent(participantName)}`, {
+        responseType: 'arraybuffer'
+      });
+
+      if (response.status === 200 && response.data) {
+        // Return the audio buffer (as base64 for JSON transport)
+        const audioBase64 = Buffer.from(response.data).toString('base64');
+        return {
+          content: [
+            {
+              type: 'audio',
+              encoding: 'base64',
+              data: audioBase64,
+              message: `Audio stream for ${participantName} in room ${roomId}`
+            }
+          ]
+        };
+      } else {
+        throw new Error('Audio stream not found or unavailable');
+      }
+    } catch (error) {
+      const errorMessage = error.response?.data?.error || error.message;
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: errorMessage,
+              message: `Failed to consume audio stream: ${errorMessage}`
             }, null, 2)
           }
         ],
