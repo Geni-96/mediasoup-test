@@ -541,6 +541,50 @@ app.get('/api/room/:roomId/participants', async (req, res) => {
 });
 
 // =============================================================================
+// MCP AUDIO CONSUMER STREAM ENDPOINT
+// =============================================================================
+
+/**
+ * GET /api/room/:roomId/audio/:participantName
+ * Returns the audio stream (RTP parameters) for a participant's consumer in a room.
+ * Response: { success, rtpParameters, kind, consumerId, error }
+ */
+app.get('/api/room/:roomId/audio/:participantName', async (req, res) => {
+  try {
+    const { roomId, participantName } = req.params;
+    // Validate room
+    const roomExists = await client.exists(`room:${roomId}`);
+    if (!roomExists) {
+      return res.status(404).json({ success: false, error: 'Room not found' });
+    }
+    // Validate consumerInfo
+    const consumerMap = consumerInfo.get(`${roomId}:${participantName}`);
+    if (!consumerMap) {
+      return res.status(404).json({ success: false, error: 'No consumer info for participant in room' });
+    }
+    // Get audio consumer
+    const consumers = consumerMap.get('consumers');
+    if (!consumers || !consumers.has(participantName)) {
+      return res.status(404).json({ success: false, error: 'Audio consumer not found for participant' });
+    }
+    const audioConsumer = consumers.get(participantName);
+    if (!audioConsumer || audioConsumer.kind !== 'audio') {
+      return res.status(404).json({ success: false, error: 'Audio consumer not found or not audio kind' });
+    }
+    // Return RTP parameters and consumer info
+    return res.json({
+      success: true,
+      consumerId: audioConsumer.id,
+      kind: audioConsumer.kind,
+      rtpParameters: audioConsumer.rtpParameters
+    });
+  } catch (error) {
+    console.error('Error in MCP audio consumer endpoint:', error);
+    return res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+// =============================================================================
 // END HTTP API ENDPOINTS
 // =============================================================================
 
