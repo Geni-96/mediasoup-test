@@ -1,4 +1,4 @@
-name: Test socket connection and redis connection
+name: CI
 
 on:
     push:
@@ -6,18 +6,21 @@ on:
     pull_request:
         branches: [master, main]
 jobs:
-    build:
+    test:
         runs-on: ubuntu-latest
-        env:
-            REDIS_HOST: ${{ secrets.REDIS_HOST }}
-            REDIS_PORT: ${{ secrets.REDIS_PORT }}
-            REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
         steps:
             - uses: actions/checkout@v4
             - uses: actions/setup-node@v4
               with:
                 node-version: 22
-            - run: npm ci
-              
-
-            - run: npm test
+                cache: 'npm'
+            - name: Install server deps
+              working-directory: server
+              run: npm ci
+            - name: Run server tests
+              working-directory: server
+              env:
+                REDIS_HOST: localhost
+                REDIS_PORT: 6379
+                REDIS_PASSWORD: test
+              run: npm test

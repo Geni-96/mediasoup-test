@@ -17,11 +17,13 @@ const BLUEHIVE_API_URL = process.env.BLUEHIVE_API_URL || 'https://ai.bluehive.co
 const BLUEHIVE_AUTH = process.env.BLUEHIVE_AUTH;
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost';
 
-(async () => {
-  await createWorkers();
-})();
 const app = express();
 const server = http.createServer(app);
+
+// Health check for CI
+app.get('/health', (_req, res) => res.json({ ok: true }));
+
+let workersReady = false;
 
 // const io = require("socket.io")(server);
 
@@ -470,11 +472,24 @@ const delPeerTransports = async(roomId, uname) =>{
   }
 }
 
-function startServer(){  
-  server.listen(PORT,()=>{
-    // console.log('started server on port 5001')
-  })
-  connectRedis();
+function startServer(port = process.env.PORT || 5001) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      if (!workersReady) {
+        await createWorkers();
+        workersReady = true;
+      }
+      await connectRedis();
+
+      server.listen(port, () => {
+        const actualPort = server.address().port;
+        // console.log(`Server listening on ${actualPort}`);
+        resolve(actualPort);
+      });
+    } catch (e) {
+      reject(e);
+    }
+  });
 }
 
 async function stopServer() {
@@ -510,4 +525,4 @@ async function stopServer() {
 
 // startServer()
 
-module.exports = ({startServer, stopServer, io, client});
+module.exports = ({startServer, stopServer, io, client, app, httpServer: server});
