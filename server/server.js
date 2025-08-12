@@ -1,6 +1,8 @@
 // src/server.js
 const express = require('express');
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 // const { mediasoup } = require('mediasoup');
 const cors = require('cors')
 require('dotenv').config();
@@ -8,7 +10,12 @@ require('dotenv').config();
 const redis = require('redis');
 const { createWorker, getRouter } = require('./mediasoup-config');
 const yaml = require('js-yaml');
+
+//environment variables
 const PORT = process.env.PORT || 5001;
+const BLUEHIVE_API_URL = process.env.BLUEHIVE_API_URL || 'https://ai.bluehive.com/api/consume-audio';
+const BLUEHIVE_AUTH = process.env.BLUEHIVE_AUTH;
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost';
 
 (async () => {
   await createWorkers();
@@ -322,12 +329,12 @@ io.on("connection", socket =>{
         try{
             console.log('sending audio chunk to Bluehive AI', formData)
             const response = await axios.post(
-            'https://ai.bluehive.com/api/consume-audio',
+            BLUEHIVE_API_URL,
             formData,
             {
             headers: {
-                'x-bluehive-authorization': 'FBoYfOkX35nT1Uv3XAinrIPbYGBzZGYQPQc2BUjC8lY',
-                'Origin': 'https://localhost:8181',
+                'x-bluehive-authorization': BLUEHIVE_AUTH,
+                'Origin': `${BACKEND_URL}:${PORT}` || 'https://localhost:5001',
                 ...formData.getHeaders()
                 },
             })
@@ -406,13 +413,13 @@ const createWebRtcTransport = async (router) => {
   try {
     const configPath = process.env.WEBRTC_TRANSPORT_YAML || path.join(__dirname, 'webrtc-transport.yaml');
     const fileContents = fs.readFileSync(configPath, 'utf8');
-    const config = yaml.load(fileContents);
-    transportConfig = config.webrtcTransport || fileConfig
+    const config = yaml.load(fileContents) || {};
+    transportConfig = config.webrtcTransport || config
   } catch (err) {
     console.error('Error reading webrtc-transport.yaml:', err);
     // Fallback to defaults if YAML not found or invalid
     transportConfig = {
-      listenIps: [{ ip: '0.0.0.0', announcedIp: '127.0.0.1' }],
+      listenIps: [{ ip: '0.0.0.0', announcedIp: process.env.BACKEND_URL || "127.0.0.1" }],
       enableUdp: true,
       enableTcp: true,
       preferUdp: true,
@@ -464,7 +471,7 @@ const delPeerTransports = async(roomId, uname) =>{
 }
 
 function startServer(){  
-  server.listen(5001,()=>{
+  server.listen(PORT,()=>{
     // console.log('started server on port 5001')
   })
   connectRedis();

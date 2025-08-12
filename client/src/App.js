@@ -2,10 +2,11 @@ import { React, useState, useRef, useEffect } from 'react';
 import { io } from "socket.io-client";
 import { Device } from "mediasoup-client";
 import SmartVoiceRecorder from 'smartaudiomonitor';
+import Config from './config';
 
-const socket = io("https://miewebconfbackend.idcxyz.shop", {
-  transports: ["websocket", "polling"],
-  withCredentials: true
+const socket = io(Config.socket.url, {
+  transports: Config.socket.transports,
+  withCredentials: Config.socket.withCredentials
 });
 
 // const socket = io();
@@ -35,13 +36,9 @@ function App() {
   const [params, setParams] = useState({
     video: {
       track: null,
-      encodings: [
-        { rid: 'r0', maxBitrate: 100000 },
-        { rid: 'r1', maxBitrate: 300000 },
-        { rid: 'r2', maxBitrate: 900000 },
-      ],
+      encodings: Config.webrtc.videoEncodings,
       codecOptions: {
-        videoGoogleStartBitrate: 1000
+        videoGoogleStartBitrate: Config.webrtc.startBitrateKbps
       },
       appData: { mediaTag: 'video' }
     },
@@ -49,7 +46,7 @@ function App() {
       track: null,
       appData: { mediaTag: 'audio' }
     }
-  })
+  });
 
   useEffect(() => {
     if (producerTransport?.id && params.video.track) {
@@ -88,22 +85,7 @@ function App() {
     console.log('roomId', roomId, room)
     try{
       if(username && (roomId || room)){
-        navigator.mediaDevices.getUserMedia({ 
-          audio: false, 
-          video: true, 
-          audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          googEchoCancellation: true,
-          googAutoGainControl: true,
-          googNoiseSuppression: true,
-          googHighpassFilter: true,
-          googTypingNoiseDetection: true,
-          googNoiseReduction: true,
-          volume: 1.0,
-          }, 
-          })
+        navigator.mediaDevices.getUserMedia(Config.mediaConstraints)
         .then(async (stream) => {
           addParticipantVideo(username,'local', stream);
           // localStream.current.srcObject = stream
@@ -405,13 +387,13 @@ socket.on('startTranscriptions', () => {
         recordingsInterval = setInterval(async() => {
             blobindex += 1
             const chunks = await recorder.getRecordings()
-            const blob = new Blob(chunks, { type: 'audio/webm;codecs=opus' })
+            const blob = new Blob(chunks, { type: Config.recorder.mimeType })
             socket.emit('audioChunks', {blob,blobindex});
             for (const chunk of chunks){
                 recorder.deleteRecording(chunk.id)
                 console.log("Deleted recording with ID:", chunk);
             }
-        }, 1000); // 1 seconds
+        }, Config.recorder.chunkIntervalMs); // 1 seconds
         
     }catch(err){
         console.error('Something went wrong in processing audioChunks',err)
@@ -441,7 +423,7 @@ const copyLink = async(e, type) => {
               successMessage1.classList.add("hidden");
           }, 2000);
         }else if(type === "transcription" && sessionId){
-          await navigator.clipboard.writeText(`https://ai.bluehive.com/session/${sessionId}`)
+          await navigator.clipboard.writeText(`${Config.links.transcriptionsBase}/${sessionId}`)
           
           // show the success message
           defaultMessage2.classList.add("hidden");

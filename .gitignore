@@ -1,12 +1,35 @@
-node_modules
-server/.env
+# OS
+.DS_Store
 server/.DS_Store
 client/.DS_Store
-.DS_Store
+
+# Node
+node_modules/
 client/node_modules
 server/node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# env files
+server/.env
+server/.env.*.local
+client/.env
+client/.env.*.local
 .env
-tests
-server/package-lock.json
+
+# Builds and caches
 client/build
-client/package-lock.json
+client/.cache/
+client/.parcel-cache/
+server/dist/
+coverage/
+*.log
+
+tests
+
+# Editor/IDE
+.vscode/
+.idea/
+

@@ -9,7 +9,7 @@ worker:
 webrtcTransport:
   listenIps:
     - ip: "0.0.0.0"
-      announcedIp: "127.0.0.1"   # replace with public IP if needed
+      announcedIp: process.env.BACKEND_URL || "127.0.0.1"   # replace with public IP if needed
   enableUdp: true
   enableTcp: true
   preferUdp: true

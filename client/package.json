@@ -2,7 +2,6 @@
   "name": "client",
   "version": "0.1.0",
   "private": true,
-  "proxy": "http://localhost:5001",
   "dependencies": {
     "@testing-library/dom": "^10.4.0",
     "@testing-library/jest-dom": "^6.6.3",
@@ -48,6 +47,7 @@
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.1.4",
+    "http-proxy-middleware": "^3.0.5",
     "tailwindcss": "^4.1.4"
   }
 }
