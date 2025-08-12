@@ -15,7 +15,7 @@ jest.mock('redis', () => {
 
 // Mock mediasoup-config to avoid spinning real workers
 jest.mock('../server/mediasoup-config', () => ({
-  createWorkers: jest.fn(async () => {}),
+  createWorker: jest.fn(async () => {}),
   getRouter: jest.fn(async () => ({
     // minimal surface if your code calls it in tests
     createWebRtcTransport: jest.fn(async () => ({

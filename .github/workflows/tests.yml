@@ -14,12 +14,13 @@ jobs:
               with:
                 node-version: 22
                 cache: 'npm'
-            - name: Install server deps
+            - name: Install deps(client and server via root scripts)
               working-directory: server
               run: npm ci
-            - name: Run server tests
+            - name: Run tests (root)
               working-directory: server
               env:
+                PORT: 0
                 REDIS_HOST: localhost
                 REDIS_PORT: 6379
                 REDIS_PASSWORD: test
