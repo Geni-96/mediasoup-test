@@ -8,6 +8,7 @@ require('dotenv').config();
 const redis = require('redis');
 const { createWorker, getRouter } = require('./mediasoup-config');
 const yaml = require('js-yaml');
+const PORT = process.env.PORT || 5001;
 
 (async () => {
   await createWorkers();
@@ -29,7 +30,7 @@ const FormData = require('form-data');
 // app.use(express.static(path.join(__dirname, '../client/build')))
 const io = require("socket.io")(server, {
   cors: {
-    origin: "http://localhost:3000",
+    origin: process.env.FRONTEND_URL || "http://localhost:3000", // Allow React frontend
     methods: ["GET", "POST"],
     credentials: true
   }
@@ -37,12 +38,12 @@ const io = require("socket.io")(server, {
 
 // cors setup
 app.use(cors({ 
-    origin: "http://localhost:3000", // Allow React frontend
+    origin: process.env.FRONTEND_URL || "http://localhost:3000", // Allow React frontend
     credentials: true  // Allow cookies & authentication headers
 }));
 
 app.use((req, res, next) => {
-    res.setHeader("Access-Control-Allow-Origin", "http://localhost:3000");
+    res.setHeader("Access-Control-Allow-Origin", process.env.FRONTEND_URL || "http://localhost:3000");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
     res.setHeader("Access-Control-Allow-Credentials", "true");
@@ -71,10 +72,6 @@ async function connectRedis() {
   console.log('Connected to Redis');
 }
 
-// startServer()
-
-// const rooms = new Map()
-// const peers = io.of('/mediasoup')
 let producer
 let consumer
 let room;
@@ -405,15 +402,16 @@ io.on("connection", socket =>{
 
 const createWebRtcTransport = async (router) => {
   // Read config from YAML file
-  let config;
+  let transportConfig;
   try {
-    const configPath = path.join(__dirname, 'webrtc-transport.yaml');
+    const configPath = process.env.WEBRTC_TRANSPORT_YAML || path.join(__dirname, 'webrtc-transport.yaml');
     const fileContents = fs.readFileSync(configPath, 'utf8');
-    config = yaml.load(fileContents);
+    const config = yaml.load(fileContents);
+    transportConfig = config.webrtcTransport || fileConfig
   } catch (err) {
     console.error('Error reading webrtc-transport.yaml:', err);
     // Fallback to defaults if YAML not found or invalid
-    config = {
+    transportConfig = {
       listenIps: [{ ip: '0.0.0.0', announcedIp: '127.0.0.1' }],
       enableUdp: true,
       enableTcp: true,
@@ -421,7 +419,7 @@ const createWebRtcTransport = async (router) => {
     };
   }
 
-  const transport = await router.createWebRtcTransport(config);
+  const transport = await router.createWebRtcTransport(transportConfig);
 
   transport.on('dtlsstatechange', dtlsState => {
     if (dtlsState === 'closed') {

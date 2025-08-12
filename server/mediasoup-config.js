@@ -14,6 +14,20 @@ const workers = [];
 let nextWorkerIndex = 0;
 const routers = new Map();
 
+try {
+  const CONFIG_PATH =
+    process.env.WEBRTC_TRANSPORT_YAML ||
+    path.join(__dirname, 'webrtc-transport.yaml');
+  const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
+  const configYaml = yaml.load(raw) || {};
+  const yamlWorker = configYaml.worker || configYaml.workerSettings; // support both keys
+  if (yamlWorker && typeof yamlWorker === 'object') {
+    workerSettings = { ...workerSettings, ...yamlWorker };
+  }
+} catch (e) {
+  console.error('Could not read worker settings from YAML, using defaults:', e.message);
+}
+
 const createWorkers = async () => {
   for (let i = 0; i < numCores; i++) {
     const worker = await mediasoup.createWorker(workerSettings);

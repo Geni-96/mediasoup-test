@@ -1,0 +1,26 @@
+# MediaSoup config for both Worker and WebRtcTransport
+
+worker:
+  logLevel: warn
+  rtcMinPort: 10000
+  rtcMaxPort: 10100
+  # logTags: [info, ice, dtls, rtp, srtp, rtx, bwe, score, simulcast, svc, sctp] # optional
+
+webrtcTransport:
+  listenIps:
+    - ip: "0.0.0.0"
+      announcedIp: "127.0.0.1"   # replace with public IP if needed
+  enableUdp: true
+  enableTcp: true
+  preferUdp: true
+
+  # Optional bitrate tuning
+  initialAvailableOutgoingBitrate: 1000000
+  minimumAvailableOutgoingBitrate: 300000
+  maxIncomingBitrate: 1500000
+
+  # Optional SCTP/datachannel
+  # enableSctp: false
+  # numSctpStreams:
+  #   OS: 1024
+  #   MIS: 1024
