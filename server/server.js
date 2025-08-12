@@ -508,6 +508,6 @@ async function stopServer() {
 }
 
 
-startServer()
+// startServer()
 
 module.exports = ({startServer, stopServer, io, client});
