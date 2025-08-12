@@ -14,11 +14,10 @@ jobs:
               with:
                 node-version: 22
                 cache: 'npm'
+                cache-dependency-path: package-lock.json
             - name: Install deps(client and server via root scripts)
-              working-directory: server
               run: npm ci
             - name: Run tests (root)
-              working-directory: server
               env:
                 PORT: 0
                 REDIS_HOST: localhost
