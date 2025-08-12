@@ -6,7 +6,9 @@ const cors = require('cors')
 require('dotenv').config();
 
 const redis = require('redis');
-const { createWorkers, getRouter } = require('./mediasoup-config');
+const { createWorker, getRouter } = require('./mediasoup-config');
+const yaml = require('js-yaml');
+
 (async () => {
   await createWorkers();
 })();
@@ -402,21 +404,33 @@ io.on("connection", socket =>{
 })
 
 const createWebRtcTransport = async (router) => {
-  const transport = await router.createWebRtcTransport({
-      listenIps: [{ ip: '0.0.0.0', announcedIp: '0.0.0.0' }],
+  // Read config from YAML file
+  let config;
+  try {
+    const configPath = path.join(__dirname, 'webrtc-transport.yaml');
+    const fileContents = fs.readFileSync(configPath, 'utf8');
+    config = yaml.load(fileContents);
+  } catch (err) {
+    console.error('Error reading webrtc-transport.yaml:', err);
+    // Fallback to defaults if YAML not found or invalid
+    config = {
+      listenIps: [{ ip: '0.0.0.0', announcedIp: '127.0.0.1' }],
       enableUdp: true,
       enableTcp: true,
       preferUdp: true,
-  });
+    };
+  }
+
+  const transport = await router.createWebRtcTransport(config);
 
   transport.on('dtlsstatechange', dtlsState => {
-      if (dtlsState === 'closed') {
+    if (dtlsState === 'closed') {
       transport.close();
-      }
+    }
   });
 
   transport.on('close', () => {
-      console.log('Transport closed')
+    console.log('Transport closed');
   });
 
   return transport;
@@ -491,4 +505,4 @@ async function stopServer() {
 
 startServer()
 
-  module.exports = ({startServer, stopServer, io, client});
+module.exports = ({startServer, stopServer, io, client});
