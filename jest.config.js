@@ -6,5 +6,8 @@ module.exports = {
   coverageDirectory: '<rootDir>/coverage',
   setupFiles: ['dotenv/config'],
   resetMocks: true,
-  restoreMocks: true
+  restoreMocks: true,
+  moduleNameMapper: {
+    '^redis$': '<rootDir>/__mocks__/redis.js'
+  }
 };

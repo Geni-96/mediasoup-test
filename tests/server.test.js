@@ -1,16 +1,29 @@
-// Mock redis to avoid real network calls
+// Mock redis to avoid real network calls and promisify its methods
 jest.mock('redis', () => {
-  const store = new Map();
-  const client = {
+  const { promisify } = require('util');
+  const redisMock = require('redis-mock');
+  // Create a single mock client instance that will be shared.
+  const mockClient = redisMock.createClient();
+
+  // The real redis v4 client is promise-based. redis-mock is callback-based.
+  // We need to wrap the mock's methods to return promises for our tests to work.
+  const promisifiedClient = {
+    ...mockClient,
+    get: promisify(mockClient.get).bind(mockClient),
+    set: promisify(mockClient.set).bind(mockClient),
+    del: promisify(mockClient.del).bind(mockClient),
+    on: mockClient.on.bind(mockClient),
+    quit: promisify(mockClient.quit).bind(mockClient),
+    // Add stubs for v4-specific properties/methods to prevent errors
     isOpen: true,
-    connect: jest.fn().mockResolvedValue(),
-    quit: jest.fn().mockResolvedValue(),
-    set: jest.fn(async (k, v) => { store.set(k, v); return 'OK'; }),
-    get: jest.fn(async (k) => store.get(k) ?? null),
-    del: jest.fn(async (k) => (store.delete(k) ? 1 : 0)),
-    on: jest.fn()
+    connect: () => Promise.resolve(),
   };
-  return { createClient: () => client };
+
+  // The redis library was changed in v4 to export createClient directly.
+  // We mock that behavior here.
+  return {
+    createClient: () => promisifiedClient,
+  };
 });
 
 // Mock mediasoup-config to avoid spinning real workers
@@ -49,9 +62,10 @@ describe('server smoke tests', () => {
   });
 
   it('redis client works (mocked)', async () => {
-    await expect(appServer.client.set('foo', 'bar')).resolves.toBe('OK');
-    await expect(appServer.client.get('foo')).resolves.toBe('bar');
-    await expect(appServer.client.del('foo')).resolves.toBe(1);
+    const client = appServer.getClient()
+    await expect(client.set('foo', 'bar')).resolves.toBe('OK');
+    await expect(client.get('foo')).resolves.toBe('bar');
+    await expect(client.del('foo')).resolves.toBe(1);
   });
 
   it('socket.io accepts connection', (done) => {

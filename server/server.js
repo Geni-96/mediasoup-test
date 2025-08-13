@@ -77,7 +77,10 @@ client.on('error', err => console.log('Redis Client Error', err));
 
 
 async function connectRedis() {
-  await client.connect();
+  // The redis-mock library does not have a .connect() method, so we check for its existence.
+  if (client && typeof client.connect === 'function') {
+    await client.connect();
+  }
   console.log('Connected to Redis');
 }
 
@@ -476,7 +479,7 @@ function startServer(port = process.env.PORT || 5001) {
   return new Promise(async (resolve, reject) => {
     try {
       if (!workersReady) {
-        await createWorkers();
+        await createWorker();
         workersReady = true;
       }
       await connectRedis();
@@ -525,4 +528,4 @@ async function stopServer() {
 
 // startServer()
 
-module.exports = ({startServer, stopServer, io, client, app, httpServer: server});
+module.exports = ({startServer, stopServer, io, app, getClient: () => client, httpServer: server});
