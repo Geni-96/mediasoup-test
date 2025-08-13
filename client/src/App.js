@@ -1,9 +1,13 @@
 import { React, useState, useRef, useEffect } from 'react';
 import { io } from "socket.io-client";
 import { Device } from "mediasoup-client";
+import Config from './config';
 
+const socket = io(Config.socket.url, {
+  transports: Config.socket.transports,
+  withCredentials: Config.socket.withCredentials
+});
 
-const socket = io();
 socket.on("connect_error", (error) => {
   console.error("WebSocket Connection Error:", error);
 })
@@ -15,11 +19,9 @@ function App() {
   const [isVisible, setIsVisible] = useState(true)
   const [meetingEnded, setMeetingEnded] = useState(false)
   const curDevice = useRef(null)
-  const [producerTransport, setProducerTransport] = useState(null);
-  const producerCreated = useRef(false);
+  const producerTransport = useRef(null);
   const consumers = useRef({});
   const consumerTransport = useRef(null)
-  const [sendTransportConnected, setSendTransportConnected] = useState(false);
   const localStream = useRef(null)
   const [isAudioMuted, setIsAudioMuted] = useState(null)
   const [isVideoPaused, setIsVideoPaused] = useState(null)
@@ -28,13 +30,9 @@ function App() {
   const [params, setParams] = useState({
     video: {
       track: null,
-      encodings: [
-        { rid: 'r0', maxBitrate: 100000 },
-        { rid: 'r1', maxBitrate: 300000 },
-        { rid: 'r2', maxBitrate: 900000 },
-      ],
+      encodings: Config.webrtc.videoEncodings,
       codecOptions: {
-        videoGoogleStartBitrate: 1000
+        videoGoogleStartBitrate: Config.webrtc.startBitrateKbps
       },
       appData: { mediaTag: 'video' }
     },
@@ -42,55 +40,88 @@ function App() {
       track: null,
       appData: { mediaTag: 'audio' }
     }
-  })
+  });
 
-  let gridColsClass = "";
-
-  if (videos.length === 1) {
-    gridColsClass = "grid-1";  // Use custom class
-  } else if (videos.length >= 2 && videos.length <= 4) {
-    gridColsClass = "grid-2";  // Use custom class
-  } else if (videos.length > 4) {
-    gridColsClass = "grid-3";  // Use custom class
-  }
-
+  // start producing video and audio tracks when producerTransport is set and video track is available
+  useEffect(() => {
+    if (producerTransport.current?.id && params.video.track) {
+      connectSendTransport();
+    }
+    
+  }, [producerTransport.current, params.video.track, meetingEnded]);
 
   useEffect(() => {
-    if (producerTransport?.id && params.video.track) {
-      connectSendTransport();
-      // sendTransportConnected.current = true;
-      setSendTransportConnected(true)
+  socket.on("new-transport", async(user) => {
+    console.log("new transport created for ", user)
+    if(user!==username && !consumers.current[user]){
+      await connectRecvTransport();
+      consumers.current[user] = true
     }
-  }, [producerTransport, params.video.track]);
-  useEffect(()=>{
-    window.addEventListener('beforeunload', () => {
-      document.getElementById('leave-button').click();
-    });
+  })
 
-  },[])
+
+  socket.on('remove video', user=>{
+    removeParticipantVideo(user)
+    socket.emit('peerLeft', user)
+  })
+
+  socket.on("remove-all-videos",async()=>{
+    console.log('removing all videos', username);
+    setMeetingEnded(true)
+    delPeerTransports()
+    setVideos([])
+    
+  })
+
+  return () => {
+    socket.off('new-transport');
+    socket.off('remove video');
+    socket.off('remove-all-videos');
+  };
+}, []);
+
+useEffect(() => {
+    socket.on('changeUsername', (newUsername) => {
+    console.log('Username changed to:', newUsername);
+    setUsername(newUsername);
+  });
+  return () =>{
+    socket.off('changeUsername');
+  }
+},[username])
   
-  const addParticipantVideo = (user, id, stream) => {
+ const addParticipantVideo = (user, id, stream) => {
     console.log(stream);
     setVideos((prevVideos) => [...prevVideos, { user, id, stream }]); // Store stream and ID
   };
 
   const removeParticipantVideo = (user) => {
     setVideos((prevVideos) => prevVideos.filter((video) => video.user !== user)); // Remove participant by username
+    consumers.current[user]=false // Reset consumer state for this user
+    console.log(`Removed video for user: ${user}`);
+    console.log('remaining participants:', videos);
     if(user===username){
       delPeerTransports()
       setMeetingEnded(true)
     }
+    console.log(consumers.current, videos)
   };
 
-  const handleSubmit = async(e) =>{
+
+  const handleSubmit = async(e,create, room) =>{
     e.preventDefault()
     let device;
     let rtpCapabilities;
-
+    
+    console.log('roomId', roomId, room)
     try{
-      if(username && roomId){
+      if(!username) {
+        alert('Please enter your name')
+        return
+      }
+      if(username && (roomId || room)){
         navigator.mediaDevices.getUserMedia({ 
-          audio: false, 
+          audio: true, 
           video: true, 
           audio: {
           echoCancellation: true,
@@ -125,7 +156,14 @@ function App() {
           }));
         })
         device = new Device()
-        socket.emit("joinRoom", {username, roomId}, async(response) =>{
+        let param = room || roomId
+        console.log('joining room with params', username, param, create)
+        socket.emit("joinRoom", {username, param, create}, async(response) =>{
+          if (response.error) {
+            alert(response.error); // or set an error state to show in your UI
+            return;
+          }
+          console.log('response from backend', response)
           if(response.rtpCapabilities){
             rtpCapabilities = response.rtpCapabilities
             await device.load({routerRtpCapabilities: rtpCapabilities})
@@ -136,7 +174,7 @@ function App() {
               const sendTransport = device.createSendTransport(response.producer);
               consumerTransport.current = device.createRecvTransport(response.consumer)
               
-              console.log('transports created on frontend', producerTransport, consumerTransport.current)
+              console.log('transports created on frontend', producerTransport.current, consumerTransport.current)
               
               sendTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {
                 try {
@@ -181,7 +219,7 @@ function App() {
                   errback(error)
                 }
               })
-              setProducerTransport(sendTransport);
+              producerTransport.current = sendTransport
               consumerTransport.current.on('connect', async ({ dtlsParameters }, callback, errback) => {
                 try {
                   // Signal local DTLS parameters to the server side transport
@@ -214,9 +252,8 @@ function App() {
     // this action will trigger the 'connect' and 'produce' events above
     try{
       console.log("connecting send transport and start producing", params)
-      const videoProducer = await producerTransport.produce(params.video)
-      const audioProducer = await producerTransport.produce(params.audio)
-      producerCreated.current = true;
+      const videoProducer = await producerTransport.current.produce(params.video)
+      const audioProducer = await producerTransport.current.produce(params.audio)
 
       videoProducer.on('trackended', () => {
         console.log('video track ended')
@@ -239,15 +276,12 @@ function App() {
   }
 
   async function connectRecvTransport() {
-    // this creates consumers on the backend and consumes videos from mediasoup.
-    // we receive the video parameters and tracks on the frontend for which we create mediastream objects and add to the UI.
-
     console.log("connecting recv transport and start consuming");
   
     await socket.emit('consume', {
       rtpCapabilities: curDevice.current.rtpCapabilities,
     }, async ({ paramsList }) => {
-  
+      console.log('Got paramsList:', paramsList.map(p => p.user));
     const userStreams = new Map(); // To group audio/video tracks by user
 
     try {
@@ -277,7 +311,7 @@ function App() {
 
       // Now add all user streams to the UI
       for (const [user, stream] of userStreams.entries()) {
-        const video_id = Math.floor(Math.random() * 100);
+        const video_id = Math.random().toString(36).substring(2, 15);
         addParticipantVideo(user, video_id, stream); // You might rename this to `addParticipantMedia`
         console.log("added participant media for", user);
         consumers.current[username] = true;
@@ -288,15 +322,6 @@ function App() {
     }
   });
 }
-
-socket.on("new-transport", user => {
-  console.log("new transport created for ", user)
-  
-  if(user!==username && !consumers.current[user]){
-    connectRecvTransport();
-    consumers.current[user] = true
-  }
-})
 
   const handleMuteAudio = () =>{
     const audioTrack = localStream.current?.getAudioTracks()[0];
@@ -321,25 +346,35 @@ socket.on("new-transport", user => {
 
     console.log(`Video ${newPausedState ? "video paused" : "video resumed"}`)
   }
-  
+
   async function handleHangup(){
     console.log('Exiting user from call:', username)
     socket.emit('hangup', username);
-    delPeerTransports()
     setMeetingEnded(true)
     setVideos([])
-    console.log('emiting hangup username', username)
+    delPeerTransports()
+    console.log('emitng hangup username', username)
+    // socket.disconnect();
   }
 
   async function delPeerTransports(){
     console.log('deleting tranports for:',username)
     try{
       
-      producerTransport.close()
-      consumerTransport.current.close()
-      const localStream = videos.find(video => video.user === username)?.stream
-      console.log(localStream, 'local video for me')
-      localStream.getTracks().forEach(track => track.stop());
+      producerTransport.current.close()
+      consumerTransport.current?.close()
+      // producerTransport = null
+      // consumerTransport.current = null
+      if(localStream.current){
+        localStream.current.getTracks().forEach(track => {
+          track.stop();
+        });
+      }
+      setTimeout(() => {
+        socket.removeAllListeners();
+        socket.disconnect()
+      }, 10000);
+      
     }catch(error){
       console.error('error deleting transports for ', username, error)
     }
@@ -350,30 +385,73 @@ socket.on("new-transport", user => {
     socket.emit('end-meeting')
   }
 
-  socket.on('remove video', user=>{
-    removeParticipantVideo(user)
-  })
+  const createMeet = (e) => {
+    e.preventDefault();
+    const room = Math.random().toString(36).substring(2, 15)
+    console.log('creating room with id:', room, typeof room) 
+    setRoomId(room)
+    handleSubmit(e, true, room)
+  }
+  const joinMeet = (e) => {
+    e.preventDefault();
+    let paramId;
+    if(!roomId){
+      paramId = new URLSearchParams(window.location.search).get('roomId');
+      if(!paramId){
+        alert("Please enter a room ID")
+        return
+      }
+    setRoomId(paramId)
+    handleSubmit(e, false, paramId)
+  }
+}
 
-  socket.on("remove-all-videos",()=>{
-    setVideos([])
-    setMeetingEnded(true)
-    delPeerTransports()
-  })
+const copyLink = async(e, type) => {
+    const successMessage1 = document.getElementById("icon-success1");
+    const defaultMessage1 = document.getElementById("icon-default1");
+    try{
+        e.preventDefault();
+        if (type === "meeting"){
+          const windowObject = window.location.href
+          const paramId = new URLSearchParams(window.location.search).get('roomId');
+          if (!paramId){
+            await navigator.clipboard.writeText(`${windowObject}?roomId=${roomId}`)
+          }
+          else{
+            await navigator.clipboard.writeText(`${windowObject}`)
+          }
+          
+          // show the success message
+          defaultMessage1.classList.add("hidden");
+          successMessage1.classList.remove("hidden");
 
-  
-  
+          // Optionally, reset the success message after a few seconds (for example, 2 seconds)
+          setTimeout(function() {
+              defaultMessage1.classList.remove("hidden");
+              successMessage1.classList.add("hidden");
+          }, 2000);
+        }else{
+          alert(`No link to copy for type: ${type}`);
+          return;
+        }
+        
+    }catch(err){
+        console.log('an error occured',err)
+    }
+}
+
 
   return (
-    <div className="flex items-center justify-center w-full">
+    <div className="w-full flex items-center justify-center">
       {meetingEnded ? 
         <div className="w-full h-screen bg-linear-to-br from-gray-300 to-gray-600">
         <h1 className="text-3xl md:text-5xl lg:7xl font-semibold absolute -translate-x-1/2 -translate-y-1/2 top-2/4 left-1/2">Thank you</h1>
         </div>
         : 
-        (<div className="container my-10 mx-auto w-full p-2">
+        (<div className="container my-10">
           {isVisible ? (
-            <form id="join-screen" onSubmit={handleSubmit} className="mx-auto my-4 p-4 border-2 dark:border-gray-200 border-gray-600  md:w-1/2">
-              <h2 className="dark:text-white text-2xl font-semibold ml-[35%] my-4">Join Room</h2>
+            <div id="join-screen" className="max-w-9/10 md:max-w-md mx-auto my-4 p-4 border-2 dark:border-gray-200 border-gray-600">
+              <h2 className="dark:text-white text-2xl font-semibold ml-[30%] my-4">Join Room</h2>
               <label className="dark:text-white my-8">
                 Display name:
                 <input
@@ -384,24 +462,19 @@ socket.on("new-transport", user => {
                 onChange={(e) => setUsername(e.target.value)}
                 />
               </label>
-              <label className="dark:text-white my-8">
-                Room number to join:
-                <input
-                type="text"
-                id="room-id"
-                placeholder="Enter room ID"
-                value={roomId}
-                onChange={(e) => setRoomId(e.target.value)}
-                />
-              </label>
-              <button id="join-button" className="mt-6 block w-full select-none rounded-lg hover:bg-gray-600 py-3 px-6 text-center align-middle bg-gray-300 dark:bg-gray-800 border border-gray-300 text-gray-900 font-bold uppercase shadow-md shadow-gray-500/20 dark:text-white dark:border-gray-50">Join Meeting</button>
-            </form>
+              
+              <div className="flex items-center justify-center mt-6 gap-2 md:gap-6">
+                <button id="create-button" onClick={createMeet} type="submit" className="submit-button">Create Meeting</button>
+                <button id="join-button" onClick={joinMeet} type="submit" className="submit-button">Join Meeting</button>
+              </div>
+            </div>
           ) : null}
-
-          <div className={`gap-2 my-4 mx-10 place-items-center ${gridColsClass}`}>
-            {videos.map((video) => (
+          
+          <div className={`grid [grid-template-columns:repeat(auto-fit,minmax(200px,1fr))] gap-2 my-4 mx-10 place-items-center`}>
+            {(videos).map((video) => (
               <div key={video.id} className="video-frame">
-                <video className="object-cover"
+                <video
+                    id = {video.id}
                     ref={(videoElement) => {
                         if (videoElement) {
                             videoElement.srcObject = video.stream;
@@ -409,32 +482,79 @@ socket.on("new-transport", user => {
                     }}
                     autoPlay
                     playsInline
-                    // muted ={video.id==='local'}
                 />
               <div className="video-username">
               {video.user}
               </div>
-              {/* {isVideoPaused && (
-                <div className="p-5 bg-linear-to-br from-white to-gray-400 dark:from-gray-900 dark:to-gray-500 border-2 dark:border-gray-200 border-gray-400 relative">
-                  <img src="icon1.png" alt="default-user-icon" className="absolute inset-0  top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"/>
-                </div>
-              )} */}
+              
           </div>
         ))}
         </div>
-        <div className="hidden dark:bg-white dark:border-gray-600"></div>
+        
         {isVisible ? null : 
-          <div className="fixed bottom-1 left-0 right-0 z-50 flex items-center justify-center gap-2 md:gap-6 mt-2 w-full">
-          <button onClick={handleMuteAudio} className="bg-white-400 border border-gray-400 rounded-full dark:bg-white dark:border-gray-600">
-            <img src={micIcon} alt="Microphone" style={{ cursor: "pointer" }} className="p-3"></img>
-          </button>
-          <button onClick={(e)=>{handleHangup()}} id="leave-button" className="custom-button">Leave</button>
-          <button onClick={(e)=>{handleEndMeet()}} className="custom-button">End Meeting</button>
-          <button onClick={handlePauseVideo} className="bg-white-400 border border-gray-400 rounded-full dark:bg-white dark:border-gray-600">
+          <div className="button-container">
+          
+          <div className="relative group inline-block">
+            <button onClick={handleMuteAudio} className="mic-bg">
+              <img src={micIcon} alt="Microphone" style={{ cursor: "pointer" }} className="p-3"></img>
+            </button>
+            <div className="tool-tip-text">
+              Mute/Unmute
+              <div className="tool-tip-arrow"></div>
+            </div>
+          </div>
+          <div className="relative group inline-block">
+              <button
+                id="copyBtn"  onClick={(e) => copyLink(e, "meeting")}
+                className="text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 rounded-full p-3 inline-flex items-center justify-center transition-colors bg-white"
+                aria-label="Copy to clipboard"
+              >
+                <span id="icon-default1">
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 18 20" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M16 1h-3.278A1.992 1.992 0 0 0 11 0H7a1.993 1.993 0 0 0-1.722 1H2a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2Zm-3 14H5a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2Zm0-4H5a1 1 0 0 1 0-2h8a1 1 0 1 1 0 2Zm0-5H5a1 1 0 0 1 0-2h2V2h4v2h2a1 1 0 1 1 0 2Z"/>
+                  </svg>
+                </span>
+
+                <span id="icon-success1" className="hidden">
+                  <svg className="w-4 h-4 text-blue-600" fill="none" viewBox="0 0 16 12" xmlns="http://www.w3.org/2000/svg">
+                    <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M1 5.917 5.724 10.5 15 1.5"/>
+                  </svg>
+                </span>
+              </button>
+              <div className="tool-tip-text">
+                Meeting Link
+                <div className="tool-tip-arrow"></div>
+              </div>
+          </div>
+          
+          <div className="relative group inline-block">
+            <button onClick={(e)=>{handleHangup()}} className="mic-bg">
+              <img src="leaveMeet.png" alt="Leave Meeting" style={{cursor:"pointer"}} className="p-3"></img>
+            </button>
+            <div className="tool-tip-text">
+                Leave Meeting
+                <div className="tool-tip-arrow"></div>
+              </div>
+          </div>
+          <div className="relative group inline-block">
+            <button  onClick={(e)=>{handleEndMeet()}} className="mic-bg">
+              <img src="endMeet.png" alt="End meeting" style={{cursor:"pointer"}} className="p-3"></img>
+            </button>
+            <div className="tool-tip-text">
+                End Meeting
+                <div className="tool-tip-arrow"></div>
+            </div>
+          </div>
+          <div className="relative group inline-block">
+          <button onClick={handlePauseVideo} className="mic-bg">
             <img src={camIcon} alt="Video Icon" style={{cursor:"pointer"}} className="p-3"></img>
           </button>
-        </div>
-        }
+          <div className="tool-tip-text">
+              Show/Hide Video
+              <div className="tool-tip-arrow"></div>
+            </div>
+          </div>
+        </div>}
         
       </div>)
       }

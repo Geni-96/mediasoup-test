@@ -1,7 +1,34 @@
-node_modules
-server/.env
+# OS
+.DS_Store
 server/.DS_Store
-tests
-server/node_modules
+client/.DS_Store
+
+# Node
+node_modules/
 client/node_modules
-server/tests
+server/node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# env files
+server/.env
+server/.env.*.local
+client/.env
+client/.env.*.local
+.env
+
+# Builds and caches
+client/build
+client/.cache/
+client/.parcel-cache/
+server/dist/
+coverage/
+*.log
+
+tests/
+
+# Editor/IDE
+.vscode/
+.idea/
