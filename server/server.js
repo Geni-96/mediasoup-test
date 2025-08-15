@@ -4,15 +4,25 @@ const http = require('http');
 require('dotenv').config();
 
 const redis = require('redis');
+const yaml = require('js-yaml');
+
 const { createWorkers, getRouter } = require('./mediasoup-config');
 (async () => {
   await createWorkers();
 })();
+
+let client;
+//environment variables
+const PORT = process.env.PORT || 5001;
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost';
+
 const app = express();
 const server = http.createServer(app);
-const PORT = process.env.PORT || 5001;
-const io = require("socket.io")(server);
 
+
+const io = require("socket.io")(server);
+// fs and path are used for parsing yaml content
+const fs = require('fs');
 const path = require('path')
 app.use(express.static(path.join(__dirname, '../client/build')))
 
@@ -367,21 +377,34 @@ io.on("connection", socket =>{
 })
 
 const createWebRtcTransport = async (router) => {
-  const transport = await router.createWebRtcTransport({
-      listenIps: [{ ip: '0.0.0.0', announcedIp: 'https://miewebconf.opensource.mieweb.org' }],
+  // Read config from YAML file
+  let transportConfig;
+  try {
+    const configPath = process.env.WEBRTC_TRANSPORT_YAML || path.join(__dirname, 'webrtc-transport.yaml');
+    const fileContents = fs.readFileSync(configPath, 'utf8');
+    const config = yaml.load(fileContents) || {};
+    transportConfig = config.webrtcTransport || config
+  } catch (err) {
+    console.error('Error reading webrtc-transport.yaml:', err);
+    // Fallback to defaults if YAML not found or invalid
+    transportConfig = {
+      listenIps: [{ ip: '0.0.0.0', announcedIp: process.env.BACKEND_URL || "127.0.0.1" }],
       enableUdp: true,
       enableTcp: true,
       preferUdp: true,
-  });
+    };
+  }
+
+  const transport = await router.createWebRtcTransport(transportConfig);
 
   transport.on('dtlsstatechange', dtlsState => {
-      if (dtlsState === 'closed') {
+    if (dtlsState === 'closed') {
       transport.close();
-      }
+    }
   });
 
   transport.on('close', () => {
-      console.log('Transport closed')
+    console.log('Transport closed');
   });
 
   return transport;
@@ -410,7 +433,7 @@ function startServer(){
   server.listen(PORT,()=>{
     console.log(`started server on port ${PORT}`)
   })
-  connectRedis();
+  // connectRedis();
 }
 
 async function stopServer() {
