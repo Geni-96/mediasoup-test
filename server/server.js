@@ -11,10 +11,9 @@ const { createWorkers, getRouter } = require('./mediasoup-config');
   await createWorkers();
 })();
 
-let client;
 //environment variables
 const PORT = process.env.PORT || 5001;
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost';
+const BACKEND_IP = process.env.BACKEND_IP || '127.0.0.1';
 
 const app = express();
 const server = http.createServer(app);
@@ -76,7 +75,7 @@ io.on("connection", socket =>{
 
     producerInfo.set(`${roomId}:${username}`, new Map());
     consumerInfo.set(`${roomId}:${username}`, new Map());
-    
+
     if(client){
       room = await client.exists(`room:${roomId}`);
     
@@ -388,7 +387,7 @@ const createWebRtcTransport = async (router) => {
     console.error('Error reading webrtc-transport.yaml:', err);
     // Fallback to defaults if YAML not found or invalid
     transportConfig = {
-      listenIps: [{ ip: '0.0.0.0', announcedIp: process.env.BACKEND_URL || "127.0.0.1" }],
+      listenIps: [{ ip: '0.0.0.0', announcedIp: BACKEND_IP || "127.0.0.1" }],
       enableUdp: true,
       enableTcp: true,
       preferUdp: true,
@@ -409,6 +408,7 @@ const createWebRtcTransport = async (router) => {
 
   return transport;
 };
+
 
 const delPeerTransports = async(roomId, uname, peers) =>{
   try{

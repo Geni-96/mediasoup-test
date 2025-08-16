@@ -3,10 +3,12 @@ import { io } from "socket.io-client";
 import { Device } from "mediasoup-client";
 import Config from './config';
 
-const socket = io(Config.socket.url, {
-  transports: Config.socket.transports,
-  withCredentials: Config.socket.withCredentials
-});
+// const socket = io(Config.socket.url, {
+//   transports: Config.socket.transports,
+//   withCredentials: Config.socket.withCredentials
+// });
+
+const socket = io();
 
 socket.on("connect_error", (error) => {
   console.error("WebSocket Connection Error:", error);
@@ -30,9 +32,13 @@ function App() {
   const [params, setParams] = useState({
     video: {
       track: null,
-      encodings: Config.webrtc.videoEncodings,
+      encodings: [
+        { rid: 'r0', maxBitrate: 100000 },
+        { rid: 'r1', maxBitrate: 300000 },
+        { rid: 'r2', maxBitrate: 900000 },
+      ],
       codecOptions: {
-        videoGoogleStartBitrate: Config.webrtc.startBitrateKbps
+        videoGoogleStartBitrate: 1000
       },
       appData: { mediaTag: 'video' }
     },
@@ -40,7 +46,7 @@ function App() {
       track: null,
       appData: { mediaTag: 'audio' }
     }
-  });
+  })
 
   // start producing video and audio tracks when producerTransport is set and video track is available
   useEffect(() => {
