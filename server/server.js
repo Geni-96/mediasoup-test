@@ -6,6 +6,7 @@ require('dotenv').config();
 const redis = require('redis');
 const yaml = require('js-yaml');
 
+let client;
 const { createWorkers, getRouter, workers } = require('./mediasoup-config');
 (async () => {
   await createWorkers();
@@ -24,6 +25,13 @@ const io = require("socket.io")(server);
 const fs = require('fs');
 const path = require('path')
 app.use(express.static(path.join(__dirname, '../client/build')))
+
+// Add this after the express.static middleware
+// This will serve the index.html file for any route that doesn't have a file extension
+// and is not an API route. This is crucial for single-page applications.
+// app.get('*', (req, res) => {
+//   res.sendFile(path.join(__dirname, '../client/build/index.html'));
+// });
 
 function validateEnv() {
   const requiredVars = ['REDIS_HOST', 'REDIS_PORT', 'REDIS_PASSWORD'];
@@ -118,7 +126,7 @@ io.on("connection", socket =>{
         rooms.set(roomId, {router, peers: []})
         room = rooms.get(roomId)
         if(rooms.has(roomId)){
-          rooms.peers.push(username)
+          room.peers.push(username)
         }
       }
       else{
@@ -343,6 +351,12 @@ io.on("connection", socket =>{
         rooms.set(roomId, room); // update Map (technically not needed unless replacing the object)
       }
   }
+  })
+
+  socket.on('peerLeft', (uname) => {
+    console.log('peer left:', uname, 'curuser', username)
+    consumerInfo.get(`${roomId}:${username}`).get('consumers').get(uname).close()
+    consumerInfo.get(`${roomId}:${username}`).get('consumers').delete(uname)
   })
 
   socket.on("end-meeting",async()=>{
