@@ -348,19 +348,19 @@ io.on("connection", socket =>{
   socket.on("end-meeting",async()=>{
     
     console.log('ending the meeting in ', roomId)
-    let peers;
+    let users;
     if(client){
       const data = await client.get(`room:${roomId}`);
       if(data){
         const {peers} = JSON.parse(data)
-        peers = peers
+        users = peers
       }
     }
     else{
-      peers = room.peers
+      users = room.peers
     }
       // console.log(peers)
-      for(const peer of peers){
+      for(const peer of users){
         console.log('About to delete peer transports for:', roomId, peer, 'inside end meet for loop')
         delPeerTransports(roomId, peer)
       }
