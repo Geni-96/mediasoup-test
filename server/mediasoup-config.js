@@ -61,9 +61,6 @@ const createRouter = async (roomId) => {
   routers.set(roomId, router);
   console.log(`Created router for room ${roomId} on worker ${worker.pid}`);
   return router;
-};
+}
 
-module.exports = {
-  createWorkers,
-  getRouter
-};
+module.exports = { createWorkers, getRouter, workers };

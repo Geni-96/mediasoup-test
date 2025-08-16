@@ -6,7 +6,7 @@ require('dotenv').config();
 const redis = require('redis');
 const yaml = require('js-yaml');
 
-const { createWorkers, getRouter } = require('./mediasoup-config');
+const { createWorkers, getRouter, workers } = require('./mediasoup-config');
 (async () => {
   await createWorkers();
 })();
@@ -438,18 +438,18 @@ function startServer(){
 
 async function stopServer() {
   try{
-    for (let [id, socket] of io.sockets.sockets) {
-      socket.disconnect(true);
-    }
+    console.log('closing server')
+    server.close()
   }catch(e){
-    console.error('error closing sockets',e)
+    console.log('error while closing server', e)
   }
   try {
-    await new Promise((resolve) => io.close(() => {
-      resolve();
-    }));
+    console.log('Closing all mediasoup workers');
+    for (const worker of workers) {
+      worker.close();
+    }
   } catch (e) {
-    console.error("[stopServer] Error closing Socket.IO:", e);
+    console.error('Error closing mediasoup workers:', e);
   }
 
   try {
