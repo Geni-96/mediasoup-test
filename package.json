@@ -1,7 +1,7 @@
 {
   "name": "mie-webconf-app",
   "description": "This is a mediasoup based web conferencing app with socket.io for signalling",
-  "version": "1.2.2",
+  "version": "1.2.6",
   "main": "server/server.js",
   "bin": {
     "mie-webconf-app": "server/server.js"

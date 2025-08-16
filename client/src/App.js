@@ -44,6 +44,13 @@ function App() {
     }
   });
 
+  //add muted property to local html video element
+  useEffect(()=>{
+    if(videos.length==1){
+      document.getElementById('local').classList.add('muted')
+    }
+  },[videos])
+
   // start producing video and audio tracks when producerTransport is set and video track is available
   useEffect(() => {
     if (producerTransport.current?.id && params.video.track) {
