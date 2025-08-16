@@ -61,7 +61,7 @@ let room;
 const paramlist = []
 let producerInfo = new Map();
 let consumerInfo = new Map();
-let username;
+// let username;
 io.on("connection", socket =>{
 
   // console.log('new peer connected', socket.id)
@@ -69,7 +69,7 @@ io.on("connection", socket =>{
     socket.io = io
     const roomId = param;
     socket.join(roomId)
-    username = username;
+    // username = username;
     socket.roomId = roomId;
     let router;
 
@@ -467,6 +467,6 @@ async function stopServer() {
 }
 
 
-startServer()
+// startServer()
 
 module.exports = ({startServer, stopServer, io, client});

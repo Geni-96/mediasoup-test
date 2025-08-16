@@ -32,13 +32,9 @@ function App() {
   const [params, setParams] = useState({
     video: {
       track: null,
-      encodings: [
-        { rid: 'r0', maxBitrate: 100000 },
-        { rid: 'r1', maxBitrate: 300000 },
-        { rid: 'r2', maxBitrate: 900000 },
-      ],
+      encodings: Config.webrtc.videoEncodings,
       codecOptions: {
-        videoGoogleStartBitrate: 1000
+        videoGoogleStartBitrate: Config.webrtc.startBitrateKbps
       },
       appData: { mediaTag: 'video' }
     },
@@ -46,7 +42,7 @@ function App() {
       track: null,
       appData: { mediaTag: 'audio' }
     }
-  })
+  });
 
   // start producing video and audio tracks when producerTransport is set and video track is available
   useEffect(() => {

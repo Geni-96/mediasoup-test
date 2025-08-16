@@ -9,6 +9,8 @@
   "files": [
     "server/server.js",
     "server/mediasoup-config.js",
+    "server/webrtc-transport.yaml",
+    "server/.env.example",
     "client/build/"
   ],
   "scripts": {
